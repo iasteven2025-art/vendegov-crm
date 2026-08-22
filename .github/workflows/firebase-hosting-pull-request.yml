@@ -13,4 +13,4 @@ jobs:
         with:
           repoToken: ${{ secrets.GITHUB_TOKEN }}
           firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_VENDEGOV_CRM }}
-          projectId: vendegov-crm
+          projectId: vendegov-crm-computeck
