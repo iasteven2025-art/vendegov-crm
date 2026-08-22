@@ -1,0 +1,8 @@
+.config/
+.firebase/
+.pnpm-cache/
+.pnpm-home/
+.pnpm-store/
+node_modules/
+*.log
+*.local

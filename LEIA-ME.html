@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Como usar - VendeGov CRM</title>
+    <style>
+      body {
+        max-width: 860px;
+        margin: 0 auto;
+        padding: 40px 22px;
+        color: #0b1f33;
+        font-family: "Segoe UI", Arial, sans-serif;
+        line-height: 1.55;
+      }
+      h1 {
+        margin-bottom: 8px;
+      }
+      a {
+        color: #0b7e59;
+        font-weight: 800;
+      }
+      section {
+        border-top: 1px solid #d9e2ea;
+        margin-top: 24px;
+        padding-top: 20px;
+      }
+      code {
+        background: #f5f7fa;
+        border: 1px solid #d9e2ea;
+        border-radius: 6px;
+        padding: 2px 6px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>VendeGov CRM - sistema local</h1>
+    <p>
+      Abra <a href="./index.html">index.html</a> para acessar o sistema. Esta versao esta
+      preparada para Firebase e GitHub. Enquanto o arquivo <code>firebase-config.js</code>
+      nao estiver preenchido, ela funciona em modo local.
+    </p>
+
+    <section>
+      <h2>O que esta incluido</h2>
+      <p>
+        Painel executivo, agenda e viagens, clientes, licitacoes, propostas, marketing,
+        contratos, entrega de documentos, renovacoes, comissoes, relatorios de vendas,
+        relatorios gerenciais, relatorios de comissoes, empresas, regioes, documentos
+        importantes, parametros do sistema, usuarios, grupos de usuarios, templates de e-mail
+        e log de auditoria.
+      </p>
+    </section>
+
+    <section>
+      <h2>Onde os dados ficam salvos</h2>
+      <p>
+        Com Firebase configurado, os dados ficam no Cloud Firestore e os anexos no Cloud Storage.
+        Sem Firebase, os dados ficam no navegador, usando armazenamento local.
+      </p>
+    </section>
+
+    <section>
+      <h2>Proxima etapa para virar SaaS real</h2>
+      <p>
+        Siga o arquivo <code>README-DEPLOY-FIREBASE-GITHUB.md</code> para criar o projeto Firebase,
+        conectar o GitHub e publicar o sistema.
+      </p>
+    </section>
+  </body>
+</html>

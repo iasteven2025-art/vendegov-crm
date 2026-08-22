@@ -1,0 +1,20 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isMember(tenantId) {
+      return signedIn() &&
+        firestore.exists(/databases/(default)/documents/tenants/$(tenantId)/members/$(request.auth.uid));
+    }
+
+    match /tenants/{tenantId}/{allPaths=**} {
+      allow read: if isMember(tenantId);
+      allow write: if isMember(tenantId) &&
+        (request.resource == null || request.resource.size < 20 * 1024 * 1024);
+    }
+  }
+}

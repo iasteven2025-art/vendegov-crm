@@ -1,0 +1,36 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function memberPath(tenantId) {
+      return /databases/$(database)/documents/tenants/$(tenantId)/members/$(request.auth.uid);
+    }
+
+    function isMember(tenantId) {
+      return signedIn() && exists(memberPath(tenantId));
+    }
+
+    function isAdmin(tenantId) {
+      return isMember(tenantId) && get(memberPath(tenantId)).data.role == "admin";
+    }
+
+    match /tenants/{tenantId} {
+      allow read: if isMember(tenantId);
+      allow create, update: if isAdmin(tenantId);
+      allow delete: if false;
+
+      match /members/{userId} {
+        allow read: if isMember(tenantId);
+        allow create, update, delete: if isAdmin(tenantId);
+      }
+
+      match /snapshots/{snapshotId} {
+        allow read, write: if isMember(tenantId);
+      }
+    }
+  }
+}
