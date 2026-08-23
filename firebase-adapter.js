@@ -13,6 +13,7 @@
   let auth = null;
   let firestore = null;
   let storage = null;
+  let ai = null;
   let user = null;
   let libsPromise = null;
 
@@ -32,11 +33,13 @@
       import(`https://www.gstatic.com/firebasejs/${sdkVersion}/firebase-auth.js`),
       import(`https://www.gstatic.com/firebasejs/${sdkVersion}/firebase-firestore.js`),
       import(`https://www.gstatic.com/firebasejs/${sdkVersion}/firebase-storage.js`),
-    ]).then(([appLib, authLib, firestoreLib, storageLib]) => ({
+      import(`https://www.gstatic.com/firebasejs/${sdkVersion}/firebase-ai.js`),
+    ]).then(([appLib, authLib, firestoreLib, storageLib, aiLib]) => ({
       appLib,
       authLib,
       firestoreLib,
       storageLib,
+      aiLib,
     }));
     return libsPromise;
   }
@@ -131,6 +134,105 @@
     return { name: file.name, path, url };
   }
 
+  function aiSettings() {
+    return settings.ai || {};
+  }
+
+  function aiModelName() {
+    return aiSettings().model || "gemini-3.6-flash";
+  }
+
+  function aiEnabled() {
+    return configured && aiSettings().enabled !== false;
+  }
+
+  async function getAiModel() {
+    if (!aiEnabled()) throw new Error("IA nao configurada. Ative o Firebase AI Logic no projeto.");
+    const ctx = await init();
+    const libs = await loadLibs();
+    if (!ai) ai = libs.aiLib.getAI(ctx.app, { backend: new libs.aiLib.GoogleAIBackend() });
+    return libs.aiLib.getGenerativeModel(ai, { model: aiModelName() });
+  }
+
+  async function fileToGenerativePart(file) {
+    const data = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = () => reject(new Error("Nao foi possivel ler o arquivo."));
+      reader.onloadend = () => resolve(String(reader.result || "").split(",")[1] || "");
+      reader.readAsDataURL(file);
+    });
+    return {
+      inlineData: {
+        data,
+        mimeType: file.type || "application/pdf",
+      },
+    };
+  }
+
+  function parseJsonResponse(text) {
+    const clean = String(text || "").trim().replace(/^```(?:json)?/i, "").replace(/```$/i, "").trim();
+    try {
+      return JSON.parse(clean);
+    } catch {
+      const match = clean.match(/\{[\s\S]*\}/);
+      if (match) return JSON.parse(match[0]);
+      throw new Error("A IA respondeu, mas nao retornou JSON valido.");
+    }
+  }
+
+  async function analyzeContractFile(file) {
+    if (!file) throw new Error("Selecione um PDF de contrato.");
+    if (file.size > 18 * 1024 * 1024) throw new Error("O PDF precisa ter ate 18 MB para analise direta.");
+    const model = await getAiModel();
+    const filePart = await fileToGenerativePart(file);
+    const prompt = `
+Voce e um assistente juridico-operacional do VendeGov CRM para empresas que vendem ao governo.
+Leia o documento enviado e extraia os dados do contrato publico.
+Responda somente JSON valido, sem markdown, neste formato:
+{
+  "numero_contrato": "",
+  "contratante": "",
+  "orgao_comprador": "",
+  "contratada": "",
+  "cnpj_contratada": "",
+  "objeto": "",
+  "fundamento_legal": "",
+  "valor_total": 0,
+  "valor_mensal": 0,
+  "data_inicio": "AAAA-MM-DD",
+  "data_fim": "AAAA-MM-DD",
+  "renovacao_prevista": "AAAA-MM-DD",
+  "indice_reajuste": "",
+  "prorrogavel": "",
+  "obrigacoes_principais": [],
+  "riscos": [],
+  "resumo": ""
+}
+Use strings vazias quando uma informacao nao estiver no documento. Valores devem ser numero em reais, sem separador de milhar.`;
+    const result = await model.generateContent([prompt, filePart]);
+    const text = result.response.text() || "";
+    return parseJsonResponse(text);
+  }
+
+  async function generateRenewalLetter(contract, renewal = {}) {
+    if (!contract) throw new Error("Selecione um contrato.");
+    const model = await getAiModel();
+    const prompt = `
+Voce e o assistente de renovacoes do VendeGov CRM.
+Gere uma carta profissional de renovacao contratual em portugues do Brasil, pronta para envio a uma empresa cliente.
+Use tom executivo, claro e comercial, com assunto, saudacao, corpo, proximos passos e assinatura "Equipe VendeGov".
+Nao invente dados ausentes; quando faltar algo, escreva de forma neutra.
+
+Dados do contrato:
+${JSON.stringify(contract, null, 2)}
+
+Dados da renovacao vinculada:
+${JSON.stringify(renewal || {}, null, 2)}
+`;
+    const result = await model.generateContent(prompt);
+    return result.response.text() || "";
+  }
+
   window.VendeGovCloud = {
     enabled: configured,
     settings,
@@ -141,6 +243,10 @@
     loadDb,
     saveDb,
     uploadFile,
+    aiEnabled,
+    aiModelName,
+    analyzeContractFile,
+    generateRenewalLetter,
     currentUser: () => user || (auth ? auth.currentUser : null),
   };
 })();
