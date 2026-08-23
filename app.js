@@ -1,5 +1,3 @@
-const STORE_KEY = "vendegov_crm_sistema_v2";
-
 const modules = [
   ["dashboard", "00", "Painel", "Geral"],
   ["agenda", "01", "Agenda e viagens", "Comercial"],
@@ -333,7 +331,7 @@ const state = {
   deleteTarget: null,
 };
 
-let db = loadDb();
+let db = emptyDb();
 
 const el = {
   loginScreen: document.querySelector("#loginScreen"),
@@ -460,7 +458,7 @@ function seedDb() {
     sistema: [
       record({ name: "Alerta de vencimento", area: "Carteira", value: "30 dias", status: "green", updatedAt: "2026-08-18", notes: "Usado no painel de proximas acoes." }),
       record({ name: "Indice padrao de reajuste", area: "Financeiro", value: "IPCA", status: "green", updatedAt: "2026-08-14", notes: "Pode ser alterado por contrato." }),
-      record({ name: "Modelo de IA para editais", area: "IA", value: "Assistente documental", status: "cyan", updatedAt: "2026-08-12", notes: "Simulado nesta versao local." }),
+      record({ name: "Modelo de IA para editais", area: "IA", value: "Assistente documental", status: "cyan", updatedAt: "2026-08-12", notes: "Assistente preparado para analise documental." }),
       record({ name: "Integracao portal de compras", area: "Integracoes", value: "Planejada", status: "yellow", updatedAt: "2026-08-10", notes: "Etapa futura para SaaS." }),
     ],
     gruposUsuarios: [
@@ -509,21 +507,6 @@ function today() {
   return new Date().toISOString().slice(0, 10);
 }
 
-function loadDb() {
-  try {
-    const raw = localStorage.getItem(STORE_KEY);
-    if (!raw) {
-      const clean = emptyDb();
-      localStorage.setItem(STORE_KEY, JSON.stringify(clean));
-      return clean;
-    }
-    const parsed = JSON.parse(raw);
-    return { ...emptyDb(), ...parsed, audit: parsed.audit || [] };
-  } catch {
-    return emptyDb();
-  }
-}
-
 function cloud() {
   return window.VendeGovCloud || null;
 }
@@ -538,32 +521,29 @@ function setCloudStatus(message) {
 
 function currentUserLabel() {
   const user = cloud()?.currentUser?.();
-  return user?.email || "Steven Passos";
+  return user?.email || "Usuario Firebase";
 }
 
 async function enterSystem(email, password) {
-  if (cloudEnabled()) {
-    setCloudStatus("Conectando ao Firebase...");
-    try {
-      const user = await cloud().signIn(email, password);
-      const remoteDb = await cloud().loadDb(emptyDb());
-      db = isDemoDb(remoteDb) ? emptyDb() : { ...emptyDb(), ...remoteDb };
-      localStorage.setItem(STORE_KEY, JSON.stringify(db));
-      if (isDemoDb(remoteDb)) {
-        await cloud().saveDb(db);
-      }
-      setCloudStatus(`Firebase conectado: ${user.email || "usuario autenticado"}.`);
-      toast("Firebase conectado. Dados sincronizados.");
-    } catch (error) {
-      setCloudStatus("Firebase indisponivel. Verifique configuracao e usuario.");
-      if (cloud().settings?.fallbackLocal === false) {
-        toast("Nao foi possivel entrar pelo Firebase.");
-        return false;
-      }
-      toast("Firebase nao conectado. Entrando em modo local.");
+  if (!cloudEnabled()) {
+    setCloudStatus("Firebase obrigatorio. Verifique a configuracao do projeto.");
+    toast("O sistema roda somente no Firebase.");
+    return false;
+  }
+  setCloudStatus("Conectando ao Firebase...");
+  try {
+    const user = await cloud().signIn(email, password);
+    const remoteDb = await cloud().loadDb(emptyDb());
+    db = isDemoDb(remoteDb) ? emptyDb() : { ...emptyDb(), ...remoteDb };
+    if (isDemoDb(remoteDb)) {
+      await cloud().saveDb(db);
     }
-  } else {
-    setCloudStatus("Modo local. Preencha firebase-config.js para usar a nuvem.");
+    setCloudStatus(`Firebase conectado: ${user.email || "usuario autenticado"}.`);
+    toast("Firebase conectado. Dados sincronizados.");
+  } catch (error) {
+    setCloudStatus("Nao foi possivel entrar pelo Firebase. Verifique usuario e senha.");
+    toast("Nao foi possivel entrar pelo Firebase.");
+    return false;
   }
   el.loginScreen.classList.add("hidden");
   el.appShell.classList.remove("hidden");
@@ -574,12 +554,18 @@ async function enterSystem(email, password) {
 function saveDb(action, detail) {
   if (action) db.audit.unshift(auditRecord(action, detail));
   db.audit = db.audit.slice(0, 80);
-  localStorage.setItem(STORE_KEY, JSON.stringify(db));
-  if (cloudEnabled()) {
-    cloud().saveDb(db).catch(() => {
-      setCloudStatus("Alteracao salva localmente. Firebase nao confirmou a sincronizacao.");
-    });
+  if (!cloudEnabled()) {
+    setCloudStatus("Firebase obrigatorio. Alteracao nao salva.");
+    toast("Firebase nao conectado. Alteracao nao salva.");
+    return;
   }
+  cloud()
+    .saveDb(db)
+    .then(() => setCloudStatus("Alteracao salva no Firebase."))
+    .catch(() => {
+      setCloudStatus("Falha ao salvar no Firebase. Verifique a conexao.");
+      toast("Falha ao salvar no Firebase.");
+    });
 }
 
 function auditRecord(action, detail) {
@@ -590,7 +576,7 @@ function init() {
   renderNav();
   bindEvents();
   updateLoginNumbers();
-  setCloudStatus(cloudEnabled() ? "Firebase configurado. Entre para sincronizar." : "Modo local ate configurar Firebase.");
+  setCloudStatus(cloudEnabled() ? "Firebase configurado. Entre para acessar." : "Firebase obrigatorio. Configure o projeto para entrar.");
 }
 
 function bindEvents() {
@@ -606,7 +592,7 @@ function bindEvents() {
     if (cloudEnabled()) await cloud().signOut().catch(() => {});
     el.appShell.classList.add("hidden");
     el.loginScreen.classList.remove("hidden");
-    setCloudStatus(cloudEnabled() ? "Firebase configurado. Entre para sincronizar." : "Modo local ate configurar Firebase.");
+    setCloudStatus(cloudEnabled() ? "Firebase configurado. Entre para acessar." : "Firebase obrigatorio. Configure o projeto para entrar.");
   });
   el.nav.addEventListener("click", (event) => {
     const button = event.target.closest("[data-view]");
@@ -767,7 +753,7 @@ function renderCrud(moduleKey) {
     <div class="module-grid">
       ${moduleCard("AI", "Acao inteligente", "Cria resumo e proxima acao para o registro selecionado.")}
       ${moduleCard("LOG", "Auditoria", "Todas as mudancas entram no historico do sistema.")}
-      ${moduleCard("EXP", "Exportacao", "Baixe a base local em JSON para backup ou migracao.")}
+      ${moduleCard("EXP", "Exportacao", "Baixe uma copia JSON da base do Firebase para backup ou migracao.")}
     </div>
   `;
   const filter = document.querySelector("#statusFilter");
@@ -992,7 +978,7 @@ async function submitForm(event) {
 function askDelete(moduleKey, id) {
   const item = (db[moduleKey] || []).find((row) => row.id === id);
   state.deleteTarget = { moduleKey, id };
-  el.confirmText.textContent = `Remover "${item?.name || "registro"}" da base local?`;
+  el.confirmText.textContent = `Remover "${item?.name || "registro"}" da base do Firebase?`;
   el.confirmModal.classList.remove("hidden");
 }
 
