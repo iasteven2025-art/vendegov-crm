@@ -354,6 +354,9 @@ const state = {
   aiDraftContract: null,
   aiLastExtraction: null,
   aiLetter: "",
+  contractFormAiBusy: false,
+  contractFormAiFile: null,
+  contractFormAiExtraction: null,
 };
 
 let db = emptyDb();
@@ -1063,23 +1066,138 @@ function openForm(moduleKey, id = null) {
   closeDrawer();
   const item = id ? (db[moduleKey] || []).find((row) => row.id === id) : null;
   state.editing = { moduleKey, id };
+  state.contractFormAiBusy = false;
+  state.contractFormAiFile = null;
+  state.contractFormAiExtraction = null;
   el.modalKicker.textContent = schema.title;
   el.modalTitle.textContent = id ? `Editar ${schema.singular}` : `Novo ${schema.singular}`;
-  el.form.innerHTML = `${schema.fields.map((f) => inputFor(f, item ? item[f.name] : "")).join("")}
+  el.form.innerHTML = `${contractAiScanner(moduleKey)}
+    ${schema.fields.map((f) => inputFor(f, item ? item[f.name] : "")).join("")}
     <div class="form-actions">
       <button class="secondary-button" type="button" id="cancelForm">Cancelar</button>
       <button class="primary-button" type="submit">Salvar</button>
     </div>`;
   el.form.querySelector("#cancelForm").addEventListener("click", closeForm);
+  bindContractAiScanner(moduleKey);
   el.modal.classList.remove("hidden");
-  const firstInput = el.form.querySelector("input, select, textarea");
+  const firstInput = el.form.querySelector("input:not([type='file']), select, textarea");
   if (firstInput) firstInput.focus();
 }
 
 function closeForm() {
   el.modal.classList.add("hidden");
   state.editing = null;
+  state.contractFormAiBusy = false;
+  state.contractFormAiFile = null;
+  state.contractFormAiExtraction = null;
   el.form.innerHTML = "";
+}
+
+function contractAiScanner(moduleKey) {
+  if (moduleKey !== "contratos") return "";
+  const aiOnline = cloudEnabled() && Boolean(cloud()?.analyzeContractFile);
+  const status = aiOnline
+    ? "Envie o PDF do contrato e confira os campos preenchidos antes de salvar."
+    : "Ative Firebase AI Logic para liberar a leitura automatica de PDFs.";
+  return `
+    <section class="contract-ai-scan wide" data-contract-ai-card>
+      <div class="contract-ai-copy">
+        <span>IA</span>
+        <div>
+          <strong>Preenchimento automatico com IA</strong>
+          <p>Escaneie o contrato para preencher numero, orgao, objeto, valores, vigencia, reajuste e observacoes.</p>
+        </div>
+      </div>
+      <input class="hidden" id="contractAiScanFile" type="file" accept="application/pdf,.pdf,text/plain,.txt" />
+      <button class="primary-button contract-ai-button" data-contract-ai-scan type="button" ${aiOnline ? "" : "disabled"}>Escanear contrato com IA</button>
+      <div class="contract-ai-status" id="contractAiScanStatus">${status}</div>
+    </section>`;
+}
+
+function bindContractAiScanner(moduleKey) {
+  if (moduleKey !== "contratos") return;
+  const button = el.form.querySelector("[data-contract-ai-scan]");
+  const input = el.form.querySelector("#contractAiScanFile");
+  if (!button || !input) return;
+  button.addEventListener("click", () => input.click());
+  input.addEventListener("change", () => {
+    const file = input.files?.[0];
+    if (file) scanContractIntoForm(file);
+  });
+}
+
+async function scanContractIntoForm(file) {
+  if (!cloudEnabled() || !cloud()?.analyzeContractFile) {
+    toast("Firebase AI Logic ainda nao esta configurado.");
+    return;
+  }
+  const button = el.form.querySelector("[data-contract-ai-scan]");
+  const status = el.form.querySelector("#contractAiScanStatus");
+  state.contractFormAiBusy = true;
+  if (button) {
+    button.disabled = true;
+    button.textContent = "Escaneando contrato...";
+  }
+  setContractAiFormStatus("Lendo documento com IA...", "Aguarde enquanto o VendeGov identifica os dados principais do contrato.");
+  try {
+    const extracted = await cloud().analyzeContractFile(file);
+    const contract = contractFromAiExtraction(extracted, file.name);
+    state.contractFormAiFile = file;
+    state.contractFormAiExtraction = extracted;
+    fillContractFormFromAi(contract, file.name);
+    saveDb("Escaneou contrato por IA", file.name);
+    setContractAiFormStatus(
+      "Campos preenchidos pela IA",
+      `${contract.name || "Contrato"} - ${contract.client || "cliente nao informado"} - vencimento ${date(contract.end)}`
+    );
+    toast("Contrato escaneado. Confira os campos antes de salvar.");
+  } catch (error) {
+    setContractAiFormStatus("Nao foi possivel escanear o contrato", aiErrorMessage(error));
+    if (status) status.classList.add("is-error");
+    toast(aiErrorMessage(error));
+  } finally {
+    state.contractFormAiBusy = false;
+    if (button) {
+      button.disabled = false;
+      button.textContent = "Escanear contrato com IA";
+    }
+  }
+}
+
+function fillContractFormFromAi(contract, fileName) {
+  const values = {
+    name: contract.name,
+    client: contract.client,
+    agency: contract.agency,
+    object: contract.object,
+    legalBasis: contract.legalBasis,
+    region: contract.region,
+    agencyType: contract.agencyType,
+    value: contract.value,
+    monthly: contract.monthly,
+    status: contract.status,
+    start: contract.start,
+    end: contract.end,
+    renewal: contract.renewal,
+    adjustment: contract.adjustment,
+    fileRef: fileName,
+    owner: contract.owner,
+    notes: contract.notes,
+  };
+  Object.entries(values).forEach(([name, value]) => {
+    const fieldEl = el.form.elements[name];
+    if (!fieldEl || fieldEl.type === "file") return;
+    fieldEl.value = value ?? "";
+    fieldEl.dispatchEvent(new Event("input", { bubbles: true }));
+    fieldEl.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+}
+
+function setContractAiFormStatus(title, text) {
+  const status = el.form.querySelector("#contractAiScanStatus");
+  if (!status) return;
+  status.classList.remove("is-error");
+  status.innerHTML = `<strong>${escapeHtml(title)}</strong><span>${escapeHtml(text)}</span>`;
 }
 
 function inputFor(f, value) {
@@ -1121,6 +1239,9 @@ async function submitForm(event) {
     values[f.name] = formData.get(f.name) || "";
     if (f.type === "number") values[f.name] = Number(values[f.name] || 0);
   });
+  if (!pendingFile && moduleKey === "contratos" && state.contractFormAiFile) {
+    pendingFile = state.contractFormAiFile;
+  }
   const recordId = id || uid();
   if (pendingFile) {
     values.fileRef = pendingFile.name;
@@ -1781,6 +1902,8 @@ function contractFromAiExtraction(data, fileName = "") {
     agency,
     object: cleanImport(data.objeto),
     legalBasis: cleanImport(data.fundamento_legal),
+    region: cleanImport(data.regiao),
+    agencyType: cleanImport(data.tipo_orgao),
     value: Number(data.valor_total || 0),
     monthly: Number(data.valor_mensal || 0),
     status: mapContractStatus("", data.data_fim),
