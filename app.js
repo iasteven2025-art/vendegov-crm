@@ -101,7 +101,10 @@ const schemas = {
       field("end", "Fim", "date"),
       field("renewal", "Renovacao prevista", "date"),
       field("adjustment", "Indice/reajuste", "text"),
-      field("documentUrl", "Arquivo do contrato", "url"),
+      field("attachment", "Enviar PDF para o Firebase", "file"),
+      field("fileRef", "Nome do PDF na plataforma", "text"),
+      field("fileUrl", "PDF salvo no VendeGov", "url"),
+      field("documentUrl", "PDF origem (importado)", "url"),
       field("sourceId", "ID origem", "text"),
       field("owner", "Responsavel", "select", true, ["Steven Passos", "Diego Pereira", "Digital Compasso", "Mariana Costa", "Rafael Lima", "Financeiro", "Equipe comercial"]),
       field("notes", "Observacoes", "textarea"),
@@ -939,7 +942,8 @@ function inputFor(f, value) {
     return `<label class="wide">${f.label}<textarea name="${f.name}" ${required}>${escapeHtml(value || "")}</textarea></label>`;
   }
   if (f.type === "file") {
-    return `<label>${f.label}<input name="${f.name}" type="file" ${required} /></label>`;
+    const accept = f.label.toLowerCase().includes("pdf") ? ` accept="application/pdf,.pdf"` : "";
+    return `<label>${f.label}<input name="${f.name}" type="file"${accept} ${required} /></label>`;
   }
   return `<label>${f.label}<input name="${f.name}" type="${f.type}" value="${escapeAttr(value || "")}" ${required} /></label>`;
 }
@@ -1030,6 +1034,7 @@ function openDetail(moduleKey, id) {
       <div class="drawer-status">${badge(item.status || "cyan")}</div>
       <div class="detail-grid">${fields}</div>
     </section>
+    ${contractPdfSection(moduleKey, item)}
     <section class="drawer-section">
       <h3>Linha do tempo</h3>
       <div class="timeline">
@@ -1061,11 +1066,30 @@ function detailField(label, value) {
   return `<div class="detail-field"><span>${escapeHtml(label)}</span><strong>${value}</strong></div>`;
 }
 
+function contractPdfSection(moduleKey, item) {
+  if (moduleKey !== "contratos" || (!item.fileUrl && !item.documentUrl)) return "";
+  const internal = item.fileUrl
+    ? `<a class="primary-button" href="${escapeAttr(item.fileUrl)}" target="_blank" rel="noreferrer">Abrir PDF no VendeGov</a>`
+    : "";
+  const source = item.documentUrl
+    ? `<a class="secondary-button" href="${escapeAttr(item.documentUrl)}" target="_blank" rel="noreferrer">Abrir PDF origem</a>`
+    : "";
+  return `
+    <section class="drawer-section">
+      <h3>PDF do contrato</h3>
+      <div class="drawer-actions">${internal}${source}</div>
+    </section>
+  `;
+}
+
 function formatFieldValue(fieldDef, value) {
   if (fieldDef.type === "number") return money(value);
   if (fieldDef.type === "date") return date(value);
   if (fieldDef.name === "status") return badge(value);
-  if (fieldDef.type === "url") return `<a href="${escapeAttr(value)}" target="_blank" rel="noreferrer">${escapeHtml(value)}</a>`;
+  if (fieldDef.type === "url") {
+    const label = fieldDef.name === "fileUrl" ? "Abrir PDF no VendeGov" : fieldDef.name === "documentUrl" ? "Abrir PDF origem" : value;
+    return `<a href="${escapeAttr(value)}" target="_blank" rel="noreferrer">${escapeHtml(label)}</a>`;
+  }
   return escapeHtml(value);
 }
 
