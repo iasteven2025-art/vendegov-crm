@@ -97,6 +97,12 @@ const schemas = {
       field("agency", "Orgao comprador", "text"),
       field("object", "Objeto", "textarea"),
       field("legalBasis", "Fundamento legal", "text"),
+      field("legalRegime", "Regime legal", "select", true, ["Lei 14.133/2021", "Lei 8.666/1993", "Outro"]),
+      field("contractNature", "Natureza para vigencia", "select", true, ["Servicos continuos", "Fornecimento continuo", "Escopo definido", "Aluguel de equipamentos/software", "Obra/projeto PPA", "Emergencial/calamidade", "Receita/eficiencia", "Monopolio/servico publico", "Outro"]),
+      field("prorrogable", "Permite prorrogacao/aditivo?", "select", true, ["Sim", "Nao", "Depende de justificativa"]),
+      field("maxTermMonths", "Prazo maximo legal estimado (meses)", "number"),
+      field("renewalAlertDays", "Alerta antes do vencimento (dias)", "number"),
+      field("addendumCount", "Aditivos realizados", "number"),
       field("region", "Regiao", "text"),
       field("agencyType", "Tipo de orgao", "text"),
       field("value", "Valor total", "number"),
@@ -146,6 +152,12 @@ const schemas = {
       field("client", "Cliente", "text", true),
       field("contract", "Contrato", "text", true),
       field("value", "Valor previsto", "number"),
+      field("legalRegime", "Regime legal", "select", true, ["Lei 14.133/2021", "Lei 8.666/1993", "Outro"]),
+      field("addendumType", "Tipo de aditivo", "select", true, ["Prorrogacao de prazo", "Reajuste", "Reequilibrio", "Acrescimo/supressao", "Renovacao comercial", "Outro"]),
+      field("currentEnd", "Vigencia atual ate", "date"),
+      field("proposedEnd", "Nova vigencia proposta", "date"),
+      field("addendumNumber", "Numero do aditivo", "text"),
+      field("regularityChecklist", "Checklist documental", "textarea"),
       field("stage", "Etapa", "select", true, ["Mapeada", "Em contato", "Proposta enviada", "Negociacao", "Renovada", "Perdida"]),
       field("status", "Status", "select", true, [["green", "Renovada"], ["cyan", "Em andamento"], ["yellow", "Atencao"], ["red", "Risco"]]),
       field("renewalDate", "Data limite", "date"),
@@ -565,7 +577,10 @@ async function enterSystem(email, password) {
     const user = await cloud().signIn(email, password);
     const remoteDb = await cloud().loadDb(emptyDb());
     db = isDemoDb(remoteDb) ? emptyDb() : { ...emptyDb(), ...remoteDb };
+    const renewed = syncAllContractRenewals();
     if (isDemoDb(remoteDb)) {
+      await cloud().saveDb(db);
+    } else if (renewed) {
       await cloud().saveDb(db);
     }
     setCloudStatus(`Firebase conectado: ${user.email || "usuario autenticado"}.`);
@@ -932,6 +947,7 @@ function clientContractCard(contract) {
         <strong>Historico</strong>
         ${history.map((item) => `<span>${item}</span>`).join("")}
       </div>
+      ${legalMonitorCard(contract, contractLegalAssessment(contract), "inline")}
     </article>`;
 }
 
@@ -970,6 +986,277 @@ function renderClientAiDiagnosis(client, rel) {
 
 function clientMetric(label, value, hint) {
   return `<article><span>${label}</span><strong>${value}</strong><small>${hint}</small></article>`;
+}
+
+function contractLegalSection(moduleKey, contract) {
+  if (moduleKey !== "contratos") return "";
+  const assessment = contractLegalAssessment(contract);
+  return `
+    <section class="drawer-section">
+      <h3>Vigencia e aditivos</h3>
+      ${legalMonitorCard(contract, assessment, "compact")}
+    </section>`;
+}
+
+function legalMonitorCard(contract, assessment = contractLegalAssessment(contract), mode = "") {
+  const checklist = assessment.checklist.map((item) => `<li>${escapeHtml(item)}</li>`).join("");
+  return `
+    <article class="legal-monitor ${mode}">
+      <div class="legal-monitor-head">
+        <div>
+          <strong>${escapeHtml(assessment.title)}</strong>
+          <span>${escapeHtml(assessment.reference)}</span>
+        </div>
+        ${badge(assessment.status)}
+      </div>
+      <div class="legal-monitor-grid">
+        ${detailField("Vencimento", date(contract.end))}
+        ${detailField("Dias restantes", String(assessment.daysRemaining))}
+        ${detailField("Prazo usado", `${assessment.usedMonths} meses`)}
+        ${detailField("Limite estimado", assessment.limitLabel)}
+      </div>
+      <p>${escapeHtml(assessment.message)}</p>
+      <ul>${checklist}</ul>
+    </article>`;
+}
+
+function applyContractLegalDefaults(contract) {
+  contract.legalRegime = inferLegalRegime(contract);
+  contract.contractNature = contract.contractNature || inferContractNature(contract);
+  const rule = legalRuleForContract(contract);
+  contract.prorrogable = normalizeProrrogable(contract.prorrogable) || rule.prorrogable;
+  contract.maxTermMonths = Number(contract.maxTermMonths || rule.maxMonths || 0);
+  contract.renewalAlertDays = Number(contract.renewalAlertDays || 120);
+  contract.addendumCount = Number(contract.addendumCount || 0);
+  return contract;
+}
+
+function syncContractRenewal(contract) {
+  if (!contract?.end) return null;
+  db.renovacoes = db.renovacoes || [];
+  const assessment = contractLegalAssessment(contract);
+  const existingIndex = db.renovacoes.findIndex((item) => (
+    item.contractId === contract.id ||
+    (sameText(item.contract, contract.name) && sameText(item.client, contract.client))
+  ));
+  const payload = {
+    name: `Renovacao ${contract.name || "contrato"}`,
+    client: contract.client,
+    clientId: contract.clientId,
+    contract: contract.name,
+    contractId: contract.id,
+    value: Number(contract.monthly || 0),
+    legalRegime: assessment.regime,
+    addendumType: "Prorrogacao de prazo",
+    currentEnd: contract.end,
+    proposedEnd: "",
+    addendumNumber: nextAddendumLabel(contract),
+    regularityChecklist: assessment.checklist.join("\n"),
+    stage: assessment.stage,
+    status: assessment.status,
+    renewalDate: contract.renewal || assessment.actionDate || contract.end,
+    owner: contract.owner || currentUserLabel() || "Equipe comercial",
+    notes: assessment.message,
+  };
+  if (existingIndex >= 0) {
+    const existing = db.renovacoes[existingIndex];
+    const hasChanges = Object.keys(payload).some((key) => String(existing[key] ?? "") !== String(payload[key] ?? ""));
+    if (!hasChanges) return existing;
+    db.renovacoes[existingIndex] = {
+      ...existing,
+      ...payload,
+      id: existing.id,
+      createdAt: existing.createdAt,
+      updatedAt: now(),
+    };
+    return db.renovacoes[existingIndex];
+  }
+  const item = record(payload);
+  db.renovacoes.unshift(item);
+  return item;
+}
+
+function syncAllContractRenewals() {
+  let changed = 0;
+  (db.contratos || []).forEach((contract) => {
+    const contractBefore = JSON.stringify(contract);
+    const before = JSON.stringify(db.renovacoes || []);
+    applyContractLegalDefaults(contract);
+    syncContractRenewal(contract);
+    if (JSON.stringify(contract) !== contractBefore || JSON.stringify(db.renovacoes || []) !== before) changed += 1;
+  });
+  return changed;
+}
+
+function contractLegalAssessment(contract) {
+  const normalized = applyContractLegalDefaults({ ...contract });
+  const rule = legalRuleForContract(normalized);
+  const daysRemaining = daysUntil(normalized.end);
+  const usedMonths = monthsBetween(normalized.start, normalized.end);
+  const maxMonths = Number(normalized.maxTermMonths || rule.maxMonths || 0);
+  const alertDays = Number(normalized.renewalAlertDays || 120);
+  const noEnd = !normalized.end;
+  let status = "green";
+  let stage = "Mapeada";
+  if (noEnd) {
+    status = "yellow";
+  } else if (daysRemaining < 0) {
+    status = "red";
+    stage = "Perdida";
+  } else if (daysRemaining <= 30) {
+    status = "red";
+    stage = "Negociacao";
+  } else if (daysRemaining <= alertDays) {
+    status = "yellow";
+    stage = "Em contato";
+  } else {
+    status = "cyan";
+  }
+  const limitReached = Boolean(maxMonths && usedMonths >= maxMonths);
+  if ((rule.blocked || limitReached) && !rule.indefinite) status = "red";
+  const actionDate = normalized.end ? addDays(normalized.end, -alertDays) : "";
+  const limitLabel = rule.indefinite ? "Prazo indeterminado com controle anual" : maxMonths ? `${maxMonths} meses` : "Conforme edital/contrato";
+  return {
+    regime: normalized.legalRegime,
+    title: rule.title,
+    reference: rule.reference,
+    status,
+    stage,
+    daysRemaining: noEnd ? "-" : daysRemaining,
+    usedMonths,
+    maxMonths,
+    limitLabel,
+    actionDate,
+    checklist: rule.checklist,
+    message: legalMessage(normalized, rule, { daysRemaining, usedMonths, maxMonths, limitReached }),
+  };
+}
+
+function legalRuleForContract(contract) {
+  const regime = inferLegalRegime(contract);
+  const nature = normalizeText(contract.contractNature);
+  if (regime === "Outro") {
+    return legalRule("Regime informado no contrato", "Controle contratual manual", 0, "Depende de justificativa", [
+      "Conferir a legislação aplicável indicada no contrato.",
+      "Validar prazo máximo, hipótese de prorrogação e documentação obrigatória.",
+      "Registrar justificativa e autorização antes do vencimento.",
+    ]);
+  }
+  if (regime === "Lei 8.666/1993") {
+    if (nature.includes("aluguel") || nature.includes("software")) {
+      return legalRule("Lei 8.666/1993 - art. 57, IV", "Aluguel de equipamentos e software", 48, "Depende de justificativa", [
+        "Confirmar previsão no instrumento convocatório/contrato.",
+        "Validar interesse da Administração e manutenção da vantagem.",
+        "Preparar termo aditivo antes do fim da vigência.",
+      ]);
+    }
+    if (nature.includes("continu")) {
+      return legalRule("Lei 8.666/1993 - art. 57, II e §4º", "Serviços contínuos", 60, "Sim", [
+        "Confirmar previsão de prorrogação no edital/contrato.",
+        "Demonstrar preço e condições mais vantajosas para a Administração.",
+        "Justificar por escrito e obter autorização prévia da autoridade competente.",
+        "Controlar limite de 60 meses e exceção justificada de até 12 meses.",
+      ]);
+    }
+    return legalRule("Lei 8.666/1993 - art. 57", "Vigência vinculada aos créditos orçamentários", 12, "Depende de justificativa", [
+      "Verificar disponibilidade orçamentária.",
+      "Confirmar hipótese legal de prorrogação.",
+      "Formalizar justificativa e autorização antes do vencimento.",
+    ]);
+  }
+  if (nature.includes("emergencial") || nature.includes("calamidade")) {
+    return { ...legalRule("Lei 14.133/2021 - art. 75, VIII", "Emergencial/calamidade", 12, "Nao", [
+      "Contratação emergencial/calamidade tem limite operacional de 1 ano.",
+      "Evitar prorrogação quando vedada pela hipótese legal.",
+      "Planejar nova contratação se a necessidade continuar.",
+    ]), blocked: true };
+  }
+  if (nature.includes("monopolio")) {
+    return { ...legalRule("Lei 14.133/2021 - art. 109", "Serviço público em monopólio", 0, "Sim", [
+      "Comprovar créditos orçamentários a cada exercício financeiro.",
+      "Manter documentação anual de vantagem/necessidade.",
+      "Registrar controle de vigência por acompanhamento anual.",
+    ]), indefinite: true };
+  }
+  if (nature.includes("escopo")) {
+    return legalRule("Lei 14.133/2021 - art. 111", "Escopo predefinido", 0, "Depende de justificativa", [
+      "Controlar conclusão do objeto/escopo contratado.",
+      "Se o objeto não foi concluído, avaliar prorrogação automática da vigência.",
+      "Se houver culpa do contratado, registrar mora e providências cabíveis.",
+    ]);
+  }
+  if (nature.includes("receita") || nature.includes("eficiencia")) {
+    return legalRule("Lei 14.133/2021 - art. 110", "Receita/eficiência", 120, "Depende de justificativa", [
+      "Verificar se há investimento pelo contratado.",
+      "Sem investimento, controlar limite de até 10 anos.",
+      "Com investimento, avaliar prazo especial de até 35 anos.",
+    ]);
+  }
+  if (nature.includes("continu")) {
+    return legalRule("Lei 14.133/2021 - arts. 106 e 107", "Serviços/fornecimentos contínuos", 120, "Sim", [
+      "Confirmar previsão de prorrogação no edital/contrato.",
+      "Atestar vantagem econômica e preços vantajosos para a Administração.",
+      "Verificar créditos orçamentários no início e a cada exercício.",
+      "Negociar condições e formalizar termo aditivo antes do vencimento.",
+      "Controlar vigência máxima decenal.",
+    ]);
+  }
+  return legalRule("Lei 14.133/2021 - art. 105", "Regra geral de duração", 0, "Depende de justificativa", [
+    "Observar prazo previsto em edital/contrato.",
+    "Verificar disponibilidade de créditos orçamentários.",
+    "Quando ultrapassar exercício financeiro, conferir previsão no PPA.",
+  ]);
+}
+
+function legalRule(reference, title, maxMonths, prorrogable, checklist) {
+  return { reference, title, maxMonths, prorrogable, checklist };
+}
+
+function legalMessage(contract, rule, stats) {
+  if (!contract.end) return "Informe a data fim para ativar o alerta de vigência.";
+  if (rule.blocked) return "A natureza informada exige atenção: a prorrogação pode ser vedada ou excepcional. Planeje nova contratação.";
+  if (stats.daysRemaining < 0) return "Contrato vencido. Regularize o histórico e avalie providências antes de qualquer renovação.";
+  if (stats.limitReached && stats.maxMonths) return "Prazo máximo estimado já foi atingido. Avalie nova contratação ou parecer jurídico.";
+  if (stats.daysRemaining <= 30) return "Vencimento crítico. Priorize autorização, documentação e termo aditivo.";
+  if (stats.daysRemaining <= Number(contract.renewalAlertDays || 120)) return "Dentro da janela de renovação. Inicie checklist, negociação e minuta do aditivo.";
+  return "Contrato monitorado. O sistema abrirá alerta quando entrar na janela de renovação.";
+}
+
+function inferLegalRegime(contract) {
+  const explicit = cleanImport(contract.legalRegime);
+  if (explicit) {
+    const normalized = normalizeText(explicit);
+    if (normalized.includes("8666") || normalized.includes("8.666")) return "Lei 8.666/1993";
+    if (normalized.includes("14133") || normalized.includes("14.133")) return "Lei 14.133/2021";
+    if (normalized === "outro") return "Outro";
+    if (["Lei 14.133/2021", "Lei 8.666/1993"].includes(explicit)) return explicit;
+  }
+  const text = normalizeText(`${contract.legalBasis || ""} ${contract.notes || ""}`);
+  if (text.includes("8666") || text.includes("8.666")) return "Lei 8.666/1993";
+  if (text.includes("14133") || text.includes("14.133")) return "Lei 14.133/2021";
+  return "Lei 14.133/2021";
+}
+
+function inferContractNature(contract) {
+  const text = normalizeText(`${contract.object || ""} ${contract.notes || ""}`);
+  if (text.includes("software") || text.includes("saas") || text.includes("licenca") || text.includes("manutencao") || text.includes("continu")) return "Servicos continuos";
+  if (text.includes("fornecimento")) return "Fornecimento continuo";
+  if (text.includes("emergencial") || text.includes("calamidade")) return "Emergencial/calamidade";
+  return "Servicos continuos";
+}
+
+function nextAddendumLabel(contract) {
+  const count = Number(contract.addendumCount || 0) + 1;
+  return `${count}º Termo Aditivo`;
+}
+
+function normalizeProrrogable(value) {
+  const raw = normalizeText(value);
+  if (!raw) return "";
+  if (["sim", "s", "true", "1"].includes(raw)) return "Sim";
+  if (["nao", "n", "false", "0"].includes(raw)) return "Nao";
+  if (raw.includes("depende") || raw.includes("justific")) return "Depende de justificativa";
+  return "";
 }
 
 function clientRelations(client) {
@@ -1026,7 +1313,20 @@ function linkedDefaults(moduleKey, client) {
     status: "green",
   };
   if (moduleKey === "contratos") {
-    return { ...base, agency: client.name, agencyType: client.segment, region: client.region, monthly: 0, value: 0 };
+    return {
+      ...base,
+      agency: client.name,
+      agencyType: client.segment,
+      region: client.region,
+      legalRegime: "Lei 14.133/2021",
+      contractNature: "Servicos continuos",
+      prorrogable: "Sim",
+      maxTermMonths: 120,
+      renewalAlertDays: 120,
+      addendumCount: 0,
+      monthly: 0,
+      value: 0,
+    };
   }
   if (moduleKey === "licitacoes") {
     return { ...base, agency: client.name, modality: "Pregao eletronico", stage: "Oportunidade", value: 0 };
@@ -1043,15 +1343,24 @@ function linkedDefaults(moduleKey, client) {
 function openContractRenewalForm(contractId) {
   const contract = (db.contratos || []).find((item) => item.id === contractId);
   if (!contract) return;
+  const assessment = contractLegalAssessment(contract);
   openForm("renovacoes", null, {
     name: `Renovacao ${contract.name || ""}`.trim(),
     client: contract.client,
     clientId: contract.clientId,
     contract: contract.name,
+    contractId: contract.id,
     value: contract.monthly,
+    legalRegime: assessment.regime,
+    addendumType: "Prorrogacao de prazo",
+    currentEnd: contract.end,
+    proposedEnd: "",
+    addendumNumber: nextAddendumLabel(contract),
+    regularityChecklist: assessment.checklist.join("\n"),
     renewalDate: contract.renewal || contract.end,
-    stage: "Carta",
-    status: "yellow",
+    stage: assessment.stage,
+    status: assessment.status,
+    notes: assessment.message,
   });
 }
 
@@ -1486,7 +1795,7 @@ async function scanContractIntoForm(file) {
   setContractAiFormStatus("Lendo documento com IA...", "Aguarde enquanto o VendeGov identifica os dados principais do contrato.");
   try {
     const extracted = await cloud().analyzeContractFile(file);
-    const contract = contractFromAiExtraction(extracted, file.name);
+    const contract = applyContractLegalDefaults(contractFromAiExtraction(extracted, file.name));
     state.contractFormAiFile = file;
     state.contractFormAiExtraction = extracted;
     fillContractFormFromAi(contract, file.name);
@@ -1516,6 +1825,12 @@ function fillContractFormFromAi(contract, fileName) {
     agency: contract.agency,
     object: contract.object,
     legalBasis: contract.legalBasis,
+    legalRegime: contract.legalRegime,
+    contractNature: contract.contractNature,
+    prorrogable: contract.prorrogable,
+    maxTermMonths: contract.maxTermMonths,
+    renewalAlertDays: contract.renewalAlertDays,
+    addendumCount: contract.addendumCount,
     region: contract.region,
     agencyType: contract.agencyType,
     value: contract.value,
@@ -1584,6 +1899,7 @@ async function submitForm(event) {
     values[f.name] = formData.get(f.name) || "";
     if (f.type === "number") values[f.name] = Number(values[f.name] || 0);
   });
+  if (moduleKey === "contratos") applyContractLegalDefaults(values);
   if (moduleKey !== "contratos") linkRecordToExistingClient(values);
   if (!pendingFile && moduleKey === "contratos" && state.contractFormAiFile) {
     pendingFile = state.contractFormAiFile;
@@ -1607,11 +1923,14 @@ async function submitForm(event) {
   if (id) {
     const idx = db[moduleKey].findIndex((item) => item.id === id);
     db[moduleKey][idx] = { ...db[moduleKey][idx], ...values, updatedAt: now() };
+    if (moduleKey === "contratos") syncContractRenewal(db[moduleKey][idx]);
     saveDb(`Editou ${schemas[moduleKey].singular}`, linkedClient ? `${values.name || id} vinculado a ${linkedClient.name}` : values.name || id);
     toast("Registro atualizado.");
   } else {
     values.id = recordId;
-    db[moduleKey].unshift(record(values));
+    const created = record(values);
+    db[moduleKey].unshift(created);
+    if (moduleKey === "contratos") syncContractRenewal(created);
     saveDb(`Criou ${schemas[moduleKey].singular}`, linkedClient ? `${values.name || "novo registro"} vinculado a ${linkedClient.name}` : values.name || "novo registro");
     toast("Registro criado.");
   }
@@ -1660,6 +1979,7 @@ function openDetail(moduleKey, id) {
       <div class="detail-grid">${fields}</div>
     </section>
     ${contractPdfSection(moduleKey, item)}
+    ${contractLegalSection(moduleKey, item)}
     <section class="drawer-section">
       <h3>Linha do tempo</h3>
       <div class="timeline">
@@ -1812,6 +2132,7 @@ function importContractsRows(rows, fileName) {
       skipped += 1;
       return;
     }
+    applyContractLegalDefaults(mapped);
     ensureClientForContract(mapped);
     const existingIndex = contracts.findIndex((item) => (
       mapped.sourceId
@@ -1833,6 +2154,7 @@ function importContractsRows(rows, fileName) {
     }
   });
   db.contratos = contracts;
+  contracts.forEach((contract) => syncContractRenewal(contract));
   saveDb("Importou contratos", `${created} novos, ${updated} atualizados, ${skipped} ignorados - ${fileName}`);
   updateLoginNumbers();
   setView("contratos");
@@ -1859,6 +2181,12 @@ function contractFromCsvRow(row) {
     agency,
     object: cleanImport(row.objeto),
     legalBasis: cleanImport(row.fundamento_legal),
+    legalRegime: cleanImport(row.regime_legal),
+    contractNature: cleanImport(row.natureza_contrato),
+    prorrogable: cleanImport(row.prorrogavel) ? (importBool(row.prorrogavel) ? "Sim" : "Nao") : "",
+    maxTermMonths: parseImportNumber(row.prazo_maximo_meses),
+    renewalAlertDays: parseImportNumber(row.alerta_renovacao_dias),
+    addendumCount: parseImportNumber(row.quantidade_aditivos || row.aditivos_realizados),
     region: cleanImport(row.regiao),
     agencyType: cleanImport(row.tipo_orgao),
     value: parseImportNumber(row.valor_total),
@@ -2250,6 +2578,12 @@ function contractFromAiExtraction(data, fileName = "") {
     agency,
     object: cleanImport(data.objeto),
     legalBasis: cleanImport(data.fundamento_legal),
+    legalRegime: cleanImport(data.regime_legal),
+    contractNature: cleanImport(data.natureza_contrato),
+    prorrogable: cleanImport(data.permite_prorrogacao) || cleanImport(data.prorrogavel),
+    maxTermMonths: Number(data.prazo_maximo_meses || 0),
+    renewalAlertDays: Number(data.alerta_renovacao_dias || 120),
+    addendumCount: Number(data.quantidade_aditivos || 0),
     region: cleanImport(data.regiao),
     agencyType: cleanImport(data.tipo_orgao),
     value: Number(data.valor_total || 0),
@@ -2269,9 +2603,11 @@ function saveAiDraftContract() {
     toast("Nao ha contrato extraido para cadastrar.");
     return;
   }
+  applyContractLegalDefaults(state.aiDraftContract);
   ensureClientForContract(state.aiDraftContract);
   const item = record(state.aiDraftContract);
   db.contratos.unshift(item);
+  syncContractRenewal(item);
   state.aiContractId = item.id;
   state.aiDraftContract = null;
   saveDb("Cadastrou contrato por IA", item.name);
@@ -2426,6 +2762,35 @@ function date(value) {
   const [year, month, day] = String(value).slice(0, 10).split("-");
   if (!year || !month || !day) return value;
   return `${day}/${month}/${year}`;
+}
+
+function parseDate(value) {
+  if (!value) return null;
+  const dt = new Date(`${String(value).slice(0, 10)}T00:00:00`);
+  return Number.isNaN(dt.getTime()) ? null : dt;
+}
+
+function daysUntil(value) {
+  const target = parseDate(value);
+  if (!target) return 0;
+  const todayDate = parseDate(today());
+  return Math.ceil((target.getTime() - todayDate.getTime()) / 86400000);
+}
+
+function addDays(value, amount) {
+  const dt = parseDate(value);
+  if (!dt) return "";
+  dt.setDate(dt.getDate() + Number(amount || 0));
+  return dt.toISOString().slice(0, 10);
+}
+
+function monthsBetween(start, end) {
+  const startDate = parseDate(start);
+  const endDate = parseDate(end);
+  if (!startDate || !endDate) return 0;
+  let months = (endDate.getFullYear() - startDate.getFullYear()) * 12 + (endDate.getMonth() - startDate.getMonth());
+  if (endDate.getDate() >= startDate.getDate()) months += 1;
+  return Math.max(0, months);
 }
 
 function formatDateTime(value) {
