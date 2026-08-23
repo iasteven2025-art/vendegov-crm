@@ -90,6 +90,10 @@ const schemas = {
       field("name", "Contrato", "text", true),
       field("client", "Cliente", "text", true),
       field("agency", "Orgao comprador", "text"),
+      field("object", "Objeto", "textarea"),
+      field("legalBasis", "Fundamento legal", "text"),
+      field("region", "Regiao", "text"),
+      field("agencyType", "Tipo de orgao", "text"),
       field("value", "Valor total", "number"),
       field("monthly", "Receita mensal", "number"),
       field("status", "Status", "select", true, [["green", "Ativo"], ["cyan", "Reajuste"], ["yellow", "Renovacao"], ["red", "Risco"]]),
@@ -97,7 +101,9 @@ const schemas = {
       field("end", "Fim", "date"),
       field("renewal", "Renovacao prevista", "date"),
       field("adjustment", "Indice/reajuste", "text"),
-      field("owner", "Responsavel", "select", true, ["Mariana Costa", "Rafael Lima", "Steven Passos", "Financeiro"]),
+      field("documentUrl", "Arquivo do contrato", "url"),
+      field("sourceId", "ID origem", "text"),
+      field("owner", "Responsavel", "select", true, ["Steven Passos", "Diego Pereira", "Digital Compasso", "Mariana Costa", "Rafael Lima", "Financeiro", "Equipe comercial"]),
       field("notes", "Observacoes", "textarea"),
     ],
     row: (r) => [mainCell(r.name, r.agency), r.client, money(r.value), money(r.monthly), `${date(r.end)}<br>${badge(r.status)}`],
@@ -609,7 +615,11 @@ function bindEvents() {
   });
   el.form.addEventListener("submit", submitForm);
   el.exportButton.addEventListener("click", exportDb);
-  el.importButton.addEventListener("click", () => el.importFile.click());
+  el.importButton.addEventListener("click", () => {
+    el.importFile.dataset.mode = "";
+    el.importFile.accept = ".json,.csv,application/json,text/csv";
+    el.importFile.click();
+  });
   el.importFile.addEventListener("change", importDb);
   el.cancelDelete.addEventListener("click", closeConfirm);
   el.confirmDelete.addEventListener("click", deleteConfirmed);
@@ -745,6 +755,7 @@ function renderCrud(moduleKey) {
             <option value="yellow">Atencao</option>
             <option value="red">Risco</option>
           </select>
+          ${moduleKey === "contratos" ? `<button class="secondary-button" data-import-contracts type="button">Importar contratos CSV</button>` : ""}
           <button class="primary-button" data-add="${moduleKey}" type="button">Novo ${schema.singular}</button>
         </div>
       </div>
@@ -875,6 +886,11 @@ function bindDynamicActions() {
   document.querySelectorAll("[data-edit]").forEach((button) => button.addEventListener("click", () => openForm(button.dataset.module, button.dataset.edit)));
   document.querySelectorAll("[data-delete]").forEach((button) => button.addEventListener("click", () => askDelete(button.dataset.module, button.dataset.delete)));
   document.querySelectorAll("[data-ai]").forEach((button) => button.addEventListener("click", () => simulateAi(button.dataset.ai)));
+  document.querySelectorAll("[data-import-contracts]").forEach((button) => button.addEventListener("click", () => {
+    el.importFile.dataset.mode = "contratos";
+    el.importFile.accept = ".csv,text/csv,application/vnd.ms-excel";
+    el.importFile.click();
+  }));
   document.querySelectorAll("[data-config]").forEach((button) => button.addEventListener("click", () => {
     state.configTab = button.dataset.config;
     renderSettings();
@@ -1084,17 +1100,235 @@ function importDb(event) {
   const reader = new FileReader();
   reader.onload = () => {
     try {
-      const incoming = JSON.parse(reader.result);
+      const content = String(reader.result || "");
+      if (isCsvFile(file) || el.importFile.dataset.mode === "contratos") {
+        importContractsCsv(content, file.name);
+        return;
+      }
+      const incoming = JSON.parse(content);
       db = { ...emptyDb(), ...incoming, audit: incoming.audit || [] };
       saveDb("Importou base", file.name);
       render();
       toast("Base importada.");
     } catch {
       toast("Nao foi possivel importar o arquivo.");
+    } finally {
+      el.importFile.dataset.mode = "";
+      el.importFile.accept = ".json,.csv,application/json,text/csv";
     }
   };
-  reader.readAsText(file);
+  reader.readAsText(file, "utf-8");
   event.target.value = "";
+}
+
+function isCsvFile(file) {
+  const name = (file.name || "").toLowerCase();
+  const type = (file.type || "").toLowerCase();
+  return name.endsWith(".csv") || type.includes("csv") || type.includes("excel");
+}
+
+function importContractsCsv(text, fileName) {
+  const rows = csvToObjects(text);
+  if (!rows.length) throw new Error("CSV vazio");
+  let created = 0;
+  let updated = 0;
+  let skipped = 0;
+  const contracts = [...(db.contratos || [])];
+  rows.forEach((row) => {
+    const mapped = contractFromCsvRow(row);
+    if (!mapped) {
+      skipped += 1;
+      return;
+    }
+    const existingIndex = contracts.findIndex((item) => (
+      mapped.sourceId
+        ? item.sourceId === mapped.sourceId || item.id === mapped.sourceId
+        : item.name === mapped.name && item.client === mapped.client && item.start === mapped.start
+    ));
+    if (existingIndex >= 0) {
+      contracts[existingIndex] = {
+        ...contracts[existingIndex],
+        ...mapped,
+        id: contracts[existingIndex].id,
+        createdAt: contracts[existingIndex].createdAt || mapped.createdAt,
+        updatedAt: now(),
+      };
+      updated += 1;
+    } else {
+      contracts.unshift(mapped);
+      created += 1;
+    }
+  });
+  db.contratos = contracts;
+  saveDb("Importou contratos", `${created} novos, ${updated} atualizados, ${skipped} ignorados - ${fileName}`);
+  updateLoginNumbers();
+  setView("contratos");
+  toast(`${created} contratos importados, ${updated} atualizados.`);
+}
+
+function contractFromCsvRow(row) {
+  const sourceId = cleanImport(row.id);
+  const number = cleanImport(row.numero_contrato);
+  const agency = cleanImport(row.orgao_contratante);
+  const client = agency || cleanImport(row.empresa_id);
+  if (!sourceId && !number && !client) return null;
+  const addendum = cleanImport(row.numero_aditivo);
+  const name = addendum ? `Contrato ${number || sourceId} - ${addendum}` : `Contrato ${number || sourceId}`;
+  const percent = cleanImport(row.percentual_reajuste);
+  const adjustment = [cleanImport(row.indice_reajuste), percent ? `${percent}%` : ""].filter(Boolean).join(" ");
+  return {
+    id: sourceId || uid(),
+    sourceId,
+    createdAt: normalizeImportDate(row.created_date) || now(),
+    updatedAt: normalizeImportDate(row.updated_date) || now(),
+    name,
+    client: client || "Cliente nao informado",
+    agency,
+    object: cleanImport(row.objeto),
+    legalBasis: cleanImport(row.fundamento_legal),
+    region: cleanImport(row.regiao),
+    agencyType: cleanImport(row.tipo_orgao),
+    value: parseImportNumber(row.valor_total),
+    monthly: parseImportNumber(row.valor_mensal),
+    status: mapContractStatus(row.status, row.data_fim),
+    start: normalizeImportDate(row.data_inicio),
+    end: normalizeImportDate(row.data_fim),
+    renewal: normalizeImportDate(row.data_renovacao),
+    adjustment,
+    documentUrl: cleanImport(row.arquivo_contrato),
+    owner: mapConsultant(row.consultor_responsavel),
+    notes: contractImportNotes(row),
+  };
+}
+
+function contractImportNotes(row) {
+  const parts = [
+    cleanImport(row.observacoes) ? `Observacoes originais: ${cleanImport(row.observacoes)}` : "",
+    cleanImport(row.vigencia_prazo) ? `Vigencia: ${cleanImport(row.vigencia_prazo)}` : "",
+    cleanImport(row.prorrogavel) ? `Prorrogavel: ${importBool(row.prorrogavel) ? "Sim" : "Nao"}` : "",
+    cleanImport(row.eh_aditivo) ? `Aditivo: ${importBool(row.eh_aditivo) ? "Sim" : "Nao"}` : "",
+    cleanImport(row.contrato_aditivo_de) ? `Contrato aditivo de: ${cleanImport(row.contrato_aditivo_de)}` : "",
+    cleanImport(row.resultado_renovacao) ? `Resultado renovacao: ${cleanImport(row.resultado_renovacao)}` : "",
+    cleanImport(row.consultor_responsavel) ? `Consultor origem: ${cleanImport(row.consultor_responsavel)}` : "",
+    cleanImport(row.pct_comissao_implantacao) ? `Comissao implantacao: ${cleanImport(row.pct_comissao_implantacao)}%` : "",
+    cleanImport(row.pct_comissao_licenciamento) ? `Comissao licenciamento: ${cleanImport(row.pct_comissao_licenciamento)}%` : "",
+    contractItemsSummary(row.itens_contrato),
+  ];
+  return parts.filter(Boolean).join("\n");
+}
+
+function contractItemsSummary(value) {
+  const text = cleanImport(value);
+  if (!text || text === "[]") return "";
+  try {
+    const items = JSON.parse(text);
+    if (Array.isArray(items)) {
+      const names = items.map((item) => cleanImport(item.nome)).filter(Boolean);
+      return names.length ? `Itens do contrato: ${names.join("; ")}` : "";
+    }
+  } catch {
+    return `Itens do contrato: ${text}`;
+  }
+  return "";
+}
+
+function csvToObjects(text) {
+  const rows = parseCsv(text.replace(/^\uFEFF/, ""));
+  if (!rows.length) return [];
+  const headers = rows.shift().map((header) => cleanImport(header));
+  return rows
+    .map((row) => Object.fromEntries(headers.map((header, index) => [header, row[index] || ""])))
+    .filter((row) => Object.values(row).some((value) => cleanImport(value)));
+}
+
+function parseCsv(text) {
+  const rows = [];
+  let row = [];
+  let fieldValue = "";
+  let quoted = false;
+  for (let i = 0; i < text.length; i += 1) {
+    const char = text[i];
+    const next = text[i + 1];
+    if (quoted) {
+      if (char === '"' && next === '"') {
+        fieldValue += '"';
+        i += 1;
+      } else if (char === '"') {
+        quoted = false;
+      } else {
+        fieldValue += char;
+      }
+    } else if (char === '"') {
+      quoted = true;
+    } else if (char === ",") {
+      row.push(fieldValue);
+      fieldValue = "";
+    } else if (char === "\n") {
+      row.push(fieldValue);
+      if (row.some((cell) => cell !== "")) rows.push(row);
+      row = [];
+      fieldValue = "";
+    } else if (char !== "\r") {
+      fieldValue += char;
+    }
+  }
+  row.push(fieldValue);
+  if (row.some((cell) => cell !== "")) rows.push(row);
+  return rows;
+}
+
+function parseImportNumber(value) {
+  const raw = cleanImport(value);
+  if (!raw) return 0;
+  const onlyNumber = raw.replace(/[^\d,.-]/g, "");
+  const comma = onlyNumber.lastIndexOf(",");
+  const dot = onlyNumber.lastIndexOf(".");
+  const normalized = comma > dot ? onlyNumber.replace(/\./g, "").replace(",", ".") : onlyNumber.replace(/,/g, "");
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function normalizeImportDate(value) {
+  const raw = cleanImport(value);
+  if (!raw) return "";
+  const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+  const br = raw.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+  if (br) return `${br[3]}-${br[2]}-${br[1]}`;
+  return raw.slice(0, 10);
+}
+
+function mapContractStatus(value, endDate) {
+  const raw = removeAccents(cleanImport(value)).toLowerCase();
+  if (raw.includes("arquivado") || raw.includes("encerrado") || raw.includes("cancelado") || raw.includes("perdido")) return "red";
+  if (raw.includes("proximo") || raw.includes("vencimento")) return "yellow";
+  if (raw.includes("renovado") || raw.includes("vigente")) return "green";
+  const end = normalizeImportDate(endDate);
+  if (end && end < today()) return "red";
+  return "cyan";
+}
+
+function mapConsultant(value) {
+  const raw = removeAccents(cleanImport(value)).toLowerCase();
+  if (raw.includes("steven")) return "Steven Passos";
+  if (raw.includes("diego")) return "Diego Pereira";
+  if (raw.includes("digitalcompasso")) return "Digital Compasso";
+  if (raw.includes("mariana")) return "Mariana Costa";
+  if (raw.includes("rafael")) return "Rafael Lima";
+  return "Equipe comercial";
+}
+
+function importBool(value) {
+  const raw = removeAccents(cleanImport(value)).toLowerCase();
+  return ["true", "sim", "s", "1", "yes"].includes(raw);
+}
+
+function cleanImport(value) {
+  return String(value ?? "").trim();
+}
+
+function removeAccents(value) {
+  return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 }
 
 function simulateAi(action) {
