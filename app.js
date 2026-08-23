@@ -1,4 +1,4 @@
-const STORE_KEY = "vendegov_crm_sistema_v1";
+const STORE_KEY = "vendegov_crm_sistema_v2";
 
 const modules = [
   ["dashboard", "00", "Painel", "Geral"],
@@ -473,6 +473,25 @@ function seedDb() {
   };
 }
 
+function emptyDb() {
+  const clean = {};
+  Object.keys(schemas).forEach((key) => {
+    clean[key] = [];
+  });
+  clean.audit = [];
+  return clean;
+}
+
+function isDemoDb(data) {
+  const hasRecord = (key, name) => Array.isArray(data?.[key]) && data[key].some((item) => item?.name === name);
+  return (
+    hasRecord("clientes", "Construtora Vale Norte") ||
+    hasRecord("clientes", "MedSupply Brasil") ||
+    hasRecord("contratos", "Contrato 021/2026") ||
+    hasRecord("financeiro", "Receita recorrente mensal")
+  );
+}
+
 function record(values) {
   return { id: uid(), createdAt: now(), updatedAt: now(), ...values };
 }
@@ -494,15 +513,14 @@ function loadDb() {
   try {
     const raw = localStorage.getItem(STORE_KEY);
     if (!raw) {
-      const seeded = seedDb();
-      seeded.audit.push(auditRecord("Sistema iniciado", "Base demonstrativa criada"));
-      localStorage.setItem(STORE_KEY, JSON.stringify(seeded));
-      return seeded;
+      const clean = emptyDb();
+      localStorage.setItem(STORE_KEY, JSON.stringify(clean));
+      return clean;
     }
     const parsed = JSON.parse(raw);
-    return { ...seedDb(), ...parsed, audit: parsed.audit || [] };
+    return { ...emptyDb(), ...parsed, audit: parsed.audit || [] };
   } catch {
-    return seedDb();
+    return emptyDb();
   }
 }
 
@@ -528,8 +546,12 @@ async function enterSystem(email, password) {
     setCloudStatus("Conectando ao Firebase...");
     try {
       const user = await cloud().signIn(email, password);
-      db = { ...seedDb(), ...(await cloud().loadDb(seedDb())) };
+      const remoteDb = await cloud().loadDb(emptyDb());
+      db = isDemoDb(remoteDb) ? emptyDb() : { ...emptyDb(), ...remoteDb };
       localStorage.setItem(STORE_KEY, JSON.stringify(db));
+      if (isDemoDb(remoteDb)) {
+        await cloud().saveDb(db);
+      }
       setCloudStatus(`Firebase conectado: ${user.email || "usuario autenticado"}.`);
       toast("Firebase conectado. Dados sincronizados.");
     } catch (error) {
@@ -671,7 +693,7 @@ function renderDashboard() {
       </section>
       <section class="panel">
         <div class="panel-header">
-          <div><h2>IA operacional</h2><p>Automacoes simuladas para demonstracao comercial.</p></div>
+          <div><h2>IA operacional</h2><p>Automacoes operacionais para apoiar a rotina comercial.</p></div>
         </div>
         <div class="ai-grid">
           ${aiButton("ED", "Analisar edital", "Extrai objeto, documentos, prazos e riscos.")}
@@ -1077,7 +1099,7 @@ function importDb(event) {
   reader.onload = () => {
     try {
       const incoming = JSON.parse(reader.result);
-      db = { ...seedDb(), ...incoming, audit: incoming.audit || [] };
+      db = { ...emptyDb(), ...incoming, audit: incoming.audit || [] };
       saveDb("Importou base", file.name);
       render();
       toast("Base importada.");
