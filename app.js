@@ -1,5 +1,3 @@
-const STORE_KEY = "vendegov_crm_sistema_v1";
-
 const modules = [
   ["dashboard", "00", "Painel", "Geral"],
   ["agenda", "01", "Agenda e viagens", "Comercial"],
@@ -30,15 +28,19 @@ const schemas = {
     columns: ["Empresa", "Segmento", "Potencial", "Status", "Responsavel", "Acoes"],
     fields: [
       field("name", "Empresa", "text", true),
-      field("segment", "Segmento", "select", true, ["Construcao", "Saude", "Tecnologia", "Transporte", "Alimentos", "Servicos"]),
+      field("segment", "Segmento/tipo", "select", true, ["Construcao", "Saude", "Tecnologia", "Transporte", "Alimentos", "Servicos", "Prefeitura", "Camara", "Consorcio", "Instituto", "Autarquia", "Fundacao", "Outro"]),
       field("cnpj", "CNPJ", "text"),
       field("contact", "Contato principal", "text"),
       field("email", "E-mail", "email"),
       field("phone", "Telefone", "text"),
       field("city", "Cidade/UF", "text"),
+      field("website", "Site/dominio", "url"),
+      field("region", "Regiao", "text"),
+      field("originalName", "Nome origem", "text"),
+      field("sourceId", "ID origem", "text"),
       field("potential", "Potencial", "number"),
       field("status", "Status", "select", true, statusOptions),
-      field("owner", "Responsavel", "select", true, ["Mariana Costa", "Rafael Lima", "Steven Passos", "Equipe comercial"]),
+      field("owner", "Responsavel", "select", true, ["Steven Passos", "Diego Pereira", "Digital Compasso", "Mariana Costa", "Rafael Lima", "Equipe comercial"]),
       field("notes", "Observacoes", "textarea"),
     ],
     row: (r) => [mainCell(r.name, r.contact || r.cnpj), r.segment, money(r.potential), badge(r.status), r.owner],
@@ -92,6 +94,10 @@ const schemas = {
       field("name", "Contrato", "text", true),
       field("client", "Cliente", "text", true),
       field("agency", "Orgao comprador", "text"),
+      field("object", "Objeto", "textarea"),
+      field("legalBasis", "Fundamento legal", "text"),
+      field("region", "Regiao", "text"),
+      field("agencyType", "Tipo de orgao", "text"),
       field("value", "Valor total", "number"),
       field("monthly", "Receita mensal", "number"),
       field("status", "Status", "select", true, [["green", "Ativo"], ["cyan", "Reajuste"], ["yellow", "Renovacao"], ["red", "Risco"]]),
@@ -99,7 +105,12 @@ const schemas = {
       field("end", "Fim", "date"),
       field("renewal", "Renovacao prevista", "date"),
       field("adjustment", "Indice/reajuste", "text"),
-      field("owner", "Responsavel", "select", true, ["Mariana Costa", "Rafael Lima", "Steven Passos", "Financeiro"]),
+      field("attachment", "Enviar PDF para o Firebase", "file"),
+      field("fileRef", "Nome do PDF na plataforma", "text"),
+      field("fileUrl", "PDF salvo no VendeGov", "url"),
+      field("documentUrl", "PDF origem (importado)", "url"),
+      field("sourceId", "ID origem", "text"),
+      field("owner", "Responsavel", "select", true, ["Steven Passos", "Diego Pereira", "Digital Compasso", "Mariana Costa", "Rafael Lima", "Financeiro", "Equipe comercial"]),
       field("notes", "Observacoes", "textarea"),
     ],
     row: (r) => [mainCell(r.name, r.agency), r.client, money(r.value), money(r.monthly), `${date(r.end)}<br>${badge(r.status)}`],
@@ -225,9 +236,14 @@ const schemas = {
     fields: [
       field("name", "Nome", "text", true),
       field("email", "E-mail", "email", true),
-      field("role", "Perfil", "select", true, ["Administrador", "Gestor", "Comercial", "Documentos", "Financeiro"]),
+      field("role", "Perfil", "select", true, ["Administrador", "Gestor", "Comercial", "Consultor", "Consultor Comercial", "Consultor de Negocios", "Documentos", "Financeiro"]),
+      field("phone", "Telefone", "text"),
+      field("photoUrl", "Foto", "url"),
+      field("contactEmail", "E-mail de contato", "email"),
+      field("sourceId", "ID origem", "text"),
       field("status", "Status", "select", true, [["green", "Ativo"], ["yellow", "Pendente"], ["red", "Bloqueado"]]),
       field("lastAccess", "Ultimo acesso", "date"),
+      field("notes", "Observacoes", "textarea"),
     ],
     row: (r) => [mainCell(r.name, r.email), r.role, badge(r.status), r.email, date(r.lastAccess)],
   },
@@ -333,7 +349,7 @@ const state = {
   deleteTarget: null,
 };
 
-let db = loadDb();
+let db = emptyDb();
 
 const el = {
   loginScreen: document.querySelector("#loginScreen"),
@@ -460,7 +476,7 @@ function seedDb() {
     sistema: [
       record({ name: "Alerta de vencimento", area: "Carteira", value: "30 dias", status: "green", updatedAt: "2026-08-18", notes: "Usado no painel de proximas acoes." }),
       record({ name: "Indice padrao de reajuste", area: "Financeiro", value: "IPCA", status: "green", updatedAt: "2026-08-14", notes: "Pode ser alterado por contrato." }),
-      record({ name: "Modelo de IA para editais", area: "IA", value: "Assistente documental", status: "cyan", updatedAt: "2026-08-12", notes: "Simulado nesta versao local." }),
+      record({ name: "Modelo de IA para editais", area: "IA", value: "Assistente documental", status: "cyan", updatedAt: "2026-08-12", notes: "Assistente preparado para analise documental." }),
       record({ name: "Integracao portal de compras", area: "Integracoes", value: "Planejada", status: "yellow", updatedAt: "2026-08-10", notes: "Etapa futura para SaaS." }),
     ],
     gruposUsuarios: [
@@ -471,6 +487,25 @@ function seedDb() {
     ],
     audit: [],
   };
+}
+
+function emptyDb() {
+  const clean = {};
+  Object.keys(schemas).forEach((key) => {
+    clean[key] = [];
+  });
+  clean.audit = [];
+  return clean;
+}
+
+function isDemoDb(data) {
+  const hasRecord = (key, name) => Array.isArray(data?.[key]) && data[key].some((item) => item?.name === name);
+  return (
+    hasRecord("clientes", "Construtora Vale Norte") ||
+    hasRecord("clientes", "MedSupply Brasil") ||
+    hasRecord("contratos", "Contrato 021/2026") ||
+    hasRecord("financeiro", "Receita recorrente mensal")
+  );
 }
 
 function record(values) {
@@ -490,22 +525,6 @@ function today() {
   return new Date().toISOString().slice(0, 10);
 }
 
-function loadDb() {
-  try {
-    const raw = localStorage.getItem(STORE_KEY);
-    if (!raw) {
-      const seeded = seedDb();
-      seeded.audit.push(auditRecord("Sistema iniciado", "Base demonstrativa criada"));
-      localStorage.setItem(STORE_KEY, JSON.stringify(seeded));
-      return seeded;
-    }
-    const parsed = JSON.parse(raw);
-    return { ...seedDb(), ...parsed, audit: parsed.audit || [] };
-  } catch {
-    return seedDb();
-  }
-}
-
 function cloud() {
   return window.VendeGovCloud || null;
 }
@@ -520,28 +539,29 @@ function setCloudStatus(message) {
 
 function currentUserLabel() {
   const user = cloud()?.currentUser?.();
-  return user?.email || "Steven Passos";
+  return user?.email || "Usuario Firebase";
 }
 
 async function enterSystem(email, password) {
-  if (cloudEnabled()) {
-    setCloudStatus("Conectando ao Firebase...");
-    try {
-      const user = await cloud().signIn(email, password);
-      db = { ...seedDb(), ...(await cloud().loadDb(seedDb())) };
-      localStorage.setItem(STORE_KEY, JSON.stringify(db));
-      setCloudStatus(`Firebase conectado: ${user.email || "usuario autenticado"}.`);
-      toast("Firebase conectado. Dados sincronizados.");
-    } catch (error) {
-      setCloudStatus("Firebase indisponivel. Verifique configuracao e usuario.");
-      if (cloud().settings?.fallbackLocal === false) {
-        toast("Nao foi possivel entrar pelo Firebase.");
-        return false;
-      }
-      toast("Firebase nao conectado. Entrando em modo local.");
+  if (!cloudEnabled()) {
+    setCloudStatus("Firebase obrigatorio. Verifique a configuracao do projeto.");
+    toast("O sistema roda somente no Firebase.");
+    return false;
+  }
+  setCloudStatus("Conectando ao Firebase...");
+  try {
+    const user = await cloud().signIn(email, password);
+    const remoteDb = await cloud().loadDb(emptyDb());
+    db = isDemoDb(remoteDb) ? emptyDb() : { ...emptyDb(), ...remoteDb };
+    if (isDemoDb(remoteDb)) {
+      await cloud().saveDb(db);
     }
-  } else {
-    setCloudStatus("Modo local. Preencha firebase-config.js para usar a nuvem.");
+    setCloudStatus(`Firebase conectado: ${user.email || "usuario autenticado"}.`);
+    toast("Firebase conectado. Dados sincronizados.");
+  } catch (error) {
+    setCloudStatus("Nao foi possivel entrar pelo Firebase. Verifique usuario e senha.");
+    toast("Nao foi possivel entrar pelo Firebase.");
+    return false;
   }
   el.loginScreen.classList.add("hidden");
   el.appShell.classList.remove("hidden");
@@ -552,12 +572,18 @@ async function enterSystem(email, password) {
 function saveDb(action, detail) {
   if (action) db.audit.unshift(auditRecord(action, detail));
   db.audit = db.audit.slice(0, 80);
-  localStorage.setItem(STORE_KEY, JSON.stringify(db));
-  if (cloudEnabled()) {
-    cloud().saveDb(db).catch(() => {
-      setCloudStatus("Alteracao salva localmente. Firebase nao confirmou a sincronizacao.");
-    });
+  if (!cloudEnabled()) {
+    setCloudStatus("Firebase obrigatorio. Alteracao nao salva.");
+    toast("Firebase nao conectado. Alteracao nao salva.");
+    return;
   }
+  cloud()
+    .saveDb(db)
+    .then(() => setCloudStatus("Alteracao salva no Firebase."))
+    .catch(() => {
+      setCloudStatus("Falha ao salvar no Firebase. Verifique a conexao.");
+      toast("Falha ao salvar no Firebase.");
+    });
 }
 
 function auditRecord(action, detail) {
@@ -568,7 +594,7 @@ function init() {
   renderNav();
   bindEvents();
   updateLoginNumbers();
-  setCloudStatus(cloudEnabled() ? "Firebase configurado. Entre para sincronizar." : "Modo local ate configurar Firebase.");
+  setCloudStatus(cloudEnabled() ? "Firebase configurado. Entre para acessar." : "Firebase obrigatorio. Configure o projeto para entrar.");
 }
 
 function bindEvents() {
@@ -584,7 +610,7 @@ function bindEvents() {
     if (cloudEnabled()) await cloud().signOut().catch(() => {});
     el.appShell.classList.add("hidden");
     el.loginScreen.classList.remove("hidden");
-    setCloudStatus(cloudEnabled() ? "Firebase configurado. Entre para sincronizar." : "Modo local ate configurar Firebase.");
+    setCloudStatus(cloudEnabled() ? "Firebase configurado. Entre para acessar." : "Firebase obrigatorio. Configure o projeto para entrar.");
   });
   el.nav.addEventListener("click", (event) => {
     const button = event.target.closest("[data-view]");
@@ -601,7 +627,11 @@ function bindEvents() {
   });
   el.form.addEventListener("submit", submitForm);
   el.exportButton.addEventListener("click", exportDb);
-  el.importButton.addEventListener("click", () => el.importFile.click());
+  el.importButton.addEventListener("click", () => {
+    el.importFile.dataset.mode = "";
+    el.importFile.accept = ".json,.csv,application/json,text/csv";
+    el.importFile.click();
+  });
   el.importFile.addEventListener("change", importDb);
   el.cancelDelete.addEventListener("click", closeConfirm);
   el.confirmDelete.addEventListener("click", deleteConfirmed);
@@ -671,7 +701,7 @@ function renderDashboard() {
       </section>
       <section class="panel">
         <div class="panel-header">
-          <div><h2>IA operacional</h2><p>Automacoes simuladas para demonstracao comercial.</p></div>
+          <div><h2>IA operacional</h2><p>Automacoes operacionais para apoiar a rotina comercial.</p></div>
         </div>
         <div class="ai-grid">
           ${aiButton("ED", "Analisar edital", "Extrai objeto, documentos, prazos e riscos.")}
@@ -737,6 +767,8 @@ function renderCrud(moduleKey) {
             <option value="yellow">Atencao</option>
             <option value="red">Risco</option>
           </select>
+          ${moduleKey === "clientes" ? `<button class="secondary-button" data-import-clients type="button">Importar clientes CSV</button>` : ""}
+          ${moduleKey === "contratos" ? `<button class="secondary-button" data-import-contracts type="button">Importar contratos CSV</button>` : ""}
           <button class="primary-button" data-add="${moduleKey}" type="button">Novo ${schema.singular}</button>
         </div>
       </div>
@@ -745,7 +777,7 @@ function renderCrud(moduleKey) {
     <div class="module-grid">
       ${moduleCard("AI", "Acao inteligente", "Cria resumo e proxima acao para o registro selecionado.")}
       ${moduleCard("LOG", "Auditoria", "Todas as mudancas entram no historico do sistema.")}
-      ${moduleCard("EXP", "Exportacao", "Baixe a base local em JSON para backup ou migracao.")}
+      ${moduleCard("EXP", "Exportacao", "Baixe uma copia JSON da base do Firebase para backup ou migracao.")}
     </div>
   `;
   const filter = document.querySelector("#statusFilter");
@@ -836,7 +868,7 @@ function renderSettings() {
     <section class="table-panel">
       <div class="table-toolbar">
         <div><h2>Parametrizacao</h2><p>Empresas, regioes, documentos, sistema, usuarios, grupos, templates e auditoria.</p></div>
-        <div class="toolbar-controls">${tabButtons}${active !== "audit" ? `<button class="primary-button" data-add="${active}" type="button">Novo</button>` : ""}</div>
+        <div class="toolbar-controls">${tabButtons}${active === "usuarios" ? `<button class="secondary-button" data-import-users type="button">Importar consultores CSV</button>` : ""}${active !== "audit" ? `<button class="primary-button" data-add="${active}" type="button">Novo</button>` : ""}</div>
       </div>
       ${body}
     </section>
@@ -867,6 +899,21 @@ function bindDynamicActions() {
   document.querySelectorAll("[data-edit]").forEach((button) => button.addEventListener("click", () => openForm(button.dataset.module, button.dataset.edit)));
   document.querySelectorAll("[data-delete]").forEach((button) => button.addEventListener("click", () => askDelete(button.dataset.module, button.dataset.delete)));
   document.querySelectorAll("[data-ai]").forEach((button) => button.addEventListener("click", () => simulateAi(button.dataset.ai)));
+  document.querySelectorAll("[data-import-clients]").forEach((button) => button.addEventListener("click", () => {
+    el.importFile.dataset.mode = "clientes";
+    el.importFile.accept = ".csv,text/csv,application/vnd.ms-excel";
+    el.importFile.click();
+  }));
+  document.querySelectorAll("[data-import-contracts]").forEach((button) => button.addEventListener("click", () => {
+    el.importFile.dataset.mode = "contratos";
+    el.importFile.accept = ".csv,text/csv,application/vnd.ms-excel";
+    el.importFile.click();
+  }));
+  document.querySelectorAll("[data-import-users]").forEach((button) => button.addEventListener("click", () => {
+    el.importFile.dataset.mode = "usuarios";
+    el.importFile.accept = ".csv,text/csv,application/vnd.ms-excel";
+    el.importFile.click();
+  }));
   document.querySelectorAll("[data-config]").forEach((button) => button.addEventListener("click", () => {
     state.configTab = button.dataset.config;
     renderSettings();
@@ -915,7 +962,8 @@ function inputFor(f, value) {
     return `<label class="wide">${f.label}<textarea name="${f.name}" ${required}>${escapeHtml(value || "")}</textarea></label>`;
   }
   if (f.type === "file") {
-    return `<label>${f.label}<input name="${f.name}" type="file" ${required} /></label>`;
+    const accept = f.label.toLowerCase().includes("pdf") ? ` accept="application/pdf,.pdf"` : "";
+    return `<label>${f.label}<input name="${f.name}" type="file"${accept} ${required} /></label>`;
   }
   return `<label>${f.label}<input name="${f.name}" type="${f.type}" value="${escapeAttr(value || "")}" ${required} /></label>`;
 }
@@ -970,7 +1018,7 @@ async function submitForm(event) {
 function askDelete(moduleKey, id) {
   const item = (db[moduleKey] || []).find((row) => row.id === id);
   state.deleteTarget = { moduleKey, id };
-  el.confirmText.textContent = `Remover "${item?.name || "registro"}" da base local?`;
+  el.confirmText.textContent = `Remover "${item?.name || "registro"}" da base do Firebase?`;
   el.confirmModal.classList.remove("hidden");
 }
 
@@ -1006,6 +1054,7 @@ function openDetail(moduleKey, id) {
       <div class="drawer-status">${badge(item.status || "cyan")}</div>
       <div class="detail-grid">${fields}</div>
     </section>
+    ${contractPdfSection(moduleKey, item)}
     <section class="drawer-section">
       <h3>Linha do tempo</h3>
       <div class="timeline">
@@ -1037,11 +1086,36 @@ function detailField(label, value) {
   return `<div class="detail-field"><span>${escapeHtml(label)}</span><strong>${value}</strong></div>`;
 }
 
+function contractPdfSection(moduleKey, item) {
+  if (moduleKey !== "contratos" || (!item.fileUrl && !item.documentUrl)) return "";
+  const internal = item.fileUrl
+    ? `<a class="primary-button" href="${escapeAttr(item.fileUrl)}" target="_blank" rel="noreferrer">Abrir PDF no VendeGov</a>`
+    : "";
+  const source = item.documentUrl
+    ? `<a class="secondary-button" href="${escapeAttr(item.documentUrl)}" target="_blank" rel="noreferrer">Abrir PDF origem</a>`
+    : "";
+  return `
+    <section class="drawer-section">
+      <h3>PDF do contrato</h3>
+      <div class="drawer-actions">${internal}${source}</div>
+    </section>
+  `;
+}
+
 function formatFieldValue(fieldDef, value) {
   if (fieldDef.type === "number") return money(value);
   if (fieldDef.type === "date") return date(value);
   if (fieldDef.name === "status") return badge(value);
-  if (fieldDef.type === "url") return `<a href="${escapeAttr(value)}" target="_blank" rel="noreferrer">${escapeHtml(value)}</a>`;
+  if (fieldDef.type === "url") {
+    const label = fieldDef.name === "fileUrl"
+      ? "Abrir PDF no VendeGov"
+      : fieldDef.name === "documentUrl"
+        ? "Abrir PDF origem"
+        : fieldDef.name === "photoUrl"
+          ? "Abrir foto"
+          : value;
+    return `<a href="${escapeAttr(value)}" target="_blank" rel="noreferrer">${escapeHtml(label)}</a>`;
+  }
   return escapeHtml(value);
 }
 
@@ -1076,17 +1150,435 @@ function importDb(event) {
   const reader = new FileReader();
   reader.onload = () => {
     try {
-      const incoming = JSON.parse(reader.result);
-      db = { ...seedDb(), ...incoming, audit: incoming.audit || [] };
+      const content = String(reader.result || "");
+      if (isCsvFile(file) || el.importFile.dataset.mode) {
+        importBase44Csv(content, file.name, el.importFile.dataset.mode);
+        return;
+      }
+      const incoming = JSON.parse(content);
+      db = { ...emptyDb(), ...incoming, audit: incoming.audit || [] };
       saveDb("Importou base", file.name);
       render();
       toast("Base importada.");
     } catch {
       toast("Nao foi possivel importar o arquivo.");
+    } finally {
+      el.importFile.dataset.mode = "";
+      el.importFile.accept = ".json,.csv,application/json,text/csv";
     }
   };
-  reader.readAsText(file);
+  reader.readAsText(file, "utf-8");
   event.target.value = "";
+}
+
+function isCsvFile(file) {
+  const name = (file.name || "").toLowerCase();
+  const type = (file.type || "").toLowerCase();
+  return name.endsWith(".csv") || type.includes("csv") || type.includes("excel");
+}
+
+function importBase44Csv(text, fileName, mode = "") {
+  const rows = csvToObjects(text);
+  if (!rows.length) throw new Error("CSV vazio");
+  const headers = Object.keys(rows[0]);
+  if (mode === "contratos" || headers.includes("numero_contrato")) return importContractsRows(rows, fileName);
+  if (mode === "clientes" || (headers.includes("nome_exibicao") && headers.includes("municipio"))) return importClientsRows(rows, fileName);
+  if (mode === "usuarios" || headers.includes("consultor_email")) return importConsultantsRows(rows, fileName);
+  throw new Error("CSV Base44 nao reconhecido");
+}
+
+function importContractsCsv(text, fileName) {
+  const rows = csvToObjects(text);
+  return importContractsRows(rows, fileName);
+}
+
+function importContractsRows(rows, fileName) {
+  if (!rows.length) throw new Error("CSV vazio");
+  let created = 0;
+  let updated = 0;
+  let skipped = 0;
+  const contracts = [...(db.contratos || [])];
+  rows.forEach((row) => {
+    const mapped = contractFromCsvRow(row);
+    if (!mapped) {
+      skipped += 1;
+      return;
+    }
+    const existingIndex = contracts.findIndex((item) => (
+      mapped.sourceId
+        ? item.sourceId === mapped.sourceId || item.id === mapped.sourceId
+        : item.name === mapped.name && item.client === mapped.client && item.start === mapped.start
+    ));
+    if (existingIndex >= 0) {
+      contracts[existingIndex] = {
+        ...contracts[existingIndex],
+        ...mapped,
+        id: contracts[existingIndex].id,
+        createdAt: contracts[existingIndex].createdAt || mapped.createdAt,
+        updatedAt: now(),
+      };
+      updated += 1;
+    } else {
+      contracts.unshift(mapped);
+      created += 1;
+    }
+  });
+  db.contratos = contracts;
+  saveDb("Importou contratos", `${created} novos, ${updated} atualizados, ${skipped} ignorados - ${fileName}`);
+  updateLoginNumbers();
+  setView("contratos");
+  toast(`${created} contratos importados, ${updated} atualizados.`);
+}
+
+function contractFromCsvRow(row) {
+  const sourceId = cleanImport(row.id);
+  const number = cleanImport(row.numero_contrato);
+  const agency = cleanImport(row.orgao_contratante);
+  const client = agency || cleanImport(row.empresa_id);
+  if (!sourceId && !number && !client) return null;
+  const addendum = cleanImport(row.numero_aditivo);
+  const name = addendum ? `Contrato ${number || sourceId} - ${addendum}` : `Contrato ${number || sourceId}`;
+  const percent = cleanImport(row.percentual_reajuste);
+  const adjustment = [cleanImport(row.indice_reajuste), percent ? `${percent}%` : ""].filter(Boolean).join(" ");
+  return {
+    id: sourceId || uid(),
+    sourceId,
+    createdAt: normalizeImportDate(row.created_date) || now(),
+    updatedAt: normalizeImportDate(row.updated_date) || now(),
+    name,
+    client: client || "Cliente nao informado",
+    agency,
+    object: cleanImport(row.objeto),
+    legalBasis: cleanImport(row.fundamento_legal),
+    region: cleanImport(row.regiao),
+    agencyType: cleanImport(row.tipo_orgao),
+    value: parseImportNumber(row.valor_total),
+    monthly: parseImportNumber(row.valor_mensal),
+    status: mapContractStatus(row.status, row.data_fim),
+    start: normalizeImportDate(row.data_inicio),
+    end: normalizeImportDate(row.data_fim),
+    renewal: normalizeImportDate(row.data_renovacao),
+    adjustment,
+    documentUrl: cleanImport(row.arquivo_contrato),
+    owner: mapConsultant(row.consultor_responsavel),
+    notes: contractImportNotes(row),
+  };
+}
+
+function contractImportNotes(row) {
+  const parts = [
+    cleanImport(row.observacoes) ? `Observacoes originais: ${cleanImport(row.observacoes)}` : "",
+    cleanImport(row.vigencia_prazo) ? `Vigencia: ${cleanImport(row.vigencia_prazo)}` : "",
+    cleanImport(row.prorrogavel) ? `Prorrogavel: ${importBool(row.prorrogavel) ? "Sim" : "Nao"}` : "",
+    cleanImport(row.eh_aditivo) ? `Aditivo: ${importBool(row.eh_aditivo) ? "Sim" : "Nao"}` : "",
+    cleanImport(row.contrato_aditivo_de) ? `Contrato aditivo de: ${cleanImport(row.contrato_aditivo_de)}` : "",
+    cleanImport(row.resultado_renovacao) ? `Resultado renovacao: ${cleanImport(row.resultado_renovacao)}` : "",
+    cleanImport(row.consultor_responsavel) ? `Consultor origem: ${cleanImport(row.consultor_responsavel)}` : "",
+    cleanImport(row.pct_comissao_implantacao) ? `Comissao implantacao: ${cleanImport(row.pct_comissao_implantacao)}%` : "",
+    cleanImport(row.pct_comissao_licenciamento) ? `Comissao licenciamento: ${cleanImport(row.pct_comissao_licenciamento)}%` : "",
+    contractItemsSummary(row.itens_contrato),
+  ];
+  return parts.filter(Boolean).join("\n");
+}
+
+function importClientsRows(rows, fileName) {
+  let created = 0;
+  let updated = 0;
+  let skipped = 0;
+  const clients = [...(db.clientes || [])];
+  rows.forEach((row) => {
+    const mapped = clientFromCsvRow(row);
+    if (!mapped) {
+      skipped += 1;
+      return;
+    }
+    const existingIndex = clients.findIndex((item) => (
+      mapped.sourceId
+        ? item.sourceId === mapped.sourceId || item.id === mapped.sourceId
+        : item.name === mapped.name && item.city === mapped.city
+    ));
+    if (existingIndex >= 0) {
+      clients[existingIndex] = {
+        ...clients[existingIndex],
+        ...mapped,
+        id: clients[existingIndex].id,
+        createdAt: clients[existingIndex].createdAt || mapped.createdAt,
+        updatedAt: now(),
+      };
+      updated += 1;
+    } else {
+      clients.unshift(mapped);
+      created += 1;
+    }
+  });
+  db.clientes = clients;
+  saveDb("Importou clientes", `${created} novos, ${updated} atualizados, ${skipped} ignorados - ${fileName}`);
+  setView("clientes");
+  toast(`${created} clientes importados, ${updated} atualizados.`);
+}
+
+function clientFromCsvRow(row) {
+  const sourceId = cleanImport(row.id);
+  const name = cleanImport(row.nome_exibicao) || cleanImport(row.orgao_original) || cleanImport(row.municipio);
+  if (!sourceId && !name) return null;
+  const contact = contactFromBase44(row.contatos);
+  return {
+    id: sourceId || uid(),
+    sourceId,
+    createdAt: normalizeImportDate(row.created_date) || now(),
+    updatedAt: normalizeImportDate(row.updated_date) || now(),
+    name: name || "Cliente nao informado",
+    segment: mapOrganizationType(row.tipo_orgao),
+    cnpj: "",
+    contact: contact.name,
+    email: contact.email,
+    phone: contact.phone,
+    city: cleanImport(row.municipio),
+    website: cleanImport(row.dominio),
+    region: cleanImport(row.regiao),
+    originalName: cleanImport(row.orgao_original),
+    potential: 0,
+    status: "green",
+    owner: "Equipe comercial",
+    notes: clientImportNotes(row, contact),
+  };
+}
+
+function clientImportNotes(row, contact) {
+  const parts = [
+    cleanImport(row.observacoes),
+    cleanImport(row.orgao_original) ? `Orgao original: ${cleanImport(row.orgao_original)}` : "",
+    cleanImport(row.tipo_orgao) ? `Tipo de orgao: ${cleanImport(row.tipo_orgao)}` : "",
+    cleanImport(row.grupo_empresa_id) ? `Grupo empresa origem: ${cleanImport(row.grupo_empresa_id)}` : "",
+    contact.summary,
+  ];
+  return parts.filter(Boolean).join("\n");
+}
+
+function contactFromBase44(value) {
+  const fallback = { name: "", phone: "", email: "", summary: "" };
+  const text = cleanImport(value);
+  if (!text || text === "[]") return fallback;
+  try {
+    const contacts = JSON.parse(text);
+    if (!Array.isArray(contacts)) return fallback;
+    const parsed = contacts.map((item) => ({
+      name: cleanImport(item.nome),
+      type: cleanImport(item.tipo),
+      value: cleanImport(item.valor),
+    })).filter((item) => item.name || item.value);
+    const first = parsed[0] || fallback;
+    const email = parsed.find((item) => item.value.includes("@"))?.value || "";
+    const phone = parsed.find((item) => !item.value.includes("@"))?.value || "";
+    const summary = parsed.length ? `Contatos origem: ${parsed.map((item) => [item.name, item.type, item.value].filter(Boolean).join(" - ")).join("; ")}` : "";
+    return { name: first.name, phone, email, summary };
+  } catch {
+    return { ...fallback, summary: `Contatos origem: ${text}` };
+  }
+}
+
+function importConsultantsRows(rows, fileName) {
+  let created = 0;
+  let updated = 0;
+  let skipped = 0;
+  const users = [...(db.usuarios || [])];
+  rows.forEach((row) => {
+    const mapped = consultantFromCsvRow(row);
+    if (!mapped) {
+      skipped += 1;
+      return;
+    }
+    const existingIndex = users.findIndex((item) => (
+      mapped.sourceId
+        ? item.sourceId === mapped.sourceId || item.id === mapped.sourceId
+        : item.email === mapped.email
+    ));
+    if (existingIndex >= 0) {
+      users[existingIndex] = {
+        ...users[existingIndex],
+        ...mapped,
+        id: users[existingIndex].id,
+        createdAt: users[existingIndex].createdAt || mapped.createdAt,
+        updatedAt: now(),
+      };
+      updated += 1;
+    } else {
+      users.unshift(mapped);
+      created += 1;
+    }
+  });
+  db.usuarios = users;
+  saveDb("Importou consultores", `${created} novos, ${updated} atualizados, ${skipped} ignorados - ${fileName}`);
+  state.configTab = "usuarios";
+  setView("configuracoes");
+  toast(`${created} consultores importados, ${updated} atualizados.`);
+}
+
+function consultantFromCsvRow(row) {
+  const sourceId = cleanImport(row.id);
+  const email = cleanImport(row.consultor_email) || cleanImport(row.email_contato);
+  const name = cleanImport(row.nome) || email;
+  if (!sourceId && !email && !name) return null;
+  return {
+    id: sourceId || uid(),
+    sourceId,
+    createdAt: normalizeImportDate(row.created_date) || now(),
+    updatedAt: normalizeImportDate(row.updated_date) || now(),
+    name: name || "Consultor nao informado",
+    email: email || cleanImport(row.email_contato),
+    contactEmail: cleanImport(row.email_contato),
+    role: mapConsultantRole(row.cargo),
+    phone: cleanImport(row.telefone),
+    photoUrl: cleanImport(row.foto_url),
+    status: "green",
+    lastAccess: normalizeImportDate(row.updated_date) || today(),
+    notes: consultantImportNotes(row),
+  };
+}
+
+function consultantImportNotes(row) {
+  const parts = [
+    cleanImport(row.cargo) ? `Cargo origem: ${cleanImport(row.cargo)}` : "",
+    cleanImport(row.empresa_id) ? `Empresa origem: ${cleanImport(row.empresa_id)}` : "",
+    cleanImport(row.grupo_empresa_id) ? `Grupo empresa origem: ${cleanImport(row.grupo_empresa_id)}` : "",
+    cleanImport(row.created_by_id) ? `Criado por origem: ${cleanImport(row.created_by_id)}` : "",
+  ];
+  return parts.filter(Boolean).join("\n");
+}
+
+function contractItemsSummary(value) {
+  const text = cleanImport(value);
+  if (!text || text === "[]") return "";
+  try {
+    const items = JSON.parse(text);
+    if (Array.isArray(items)) {
+      const names = items.map((item) => cleanImport(item.nome)).filter(Boolean);
+      return names.length ? `Itens do contrato: ${names.join("; ")}` : "";
+    }
+  } catch {
+    return `Itens do contrato: ${text}`;
+  }
+  return "";
+}
+
+function csvToObjects(text) {
+  const rows = parseCsv(text.replace(/^\uFEFF/, ""));
+  if (!rows.length) return [];
+  const headers = rows.shift().map((header) => cleanImport(header));
+  return rows
+    .map((row) => Object.fromEntries(headers.map((header, index) => [header, row[index] || ""])))
+    .filter((row) => Object.values(row).some((value) => cleanImport(value)));
+}
+
+function parseCsv(text) {
+  const rows = [];
+  let row = [];
+  let fieldValue = "";
+  let quoted = false;
+  for (let i = 0; i < text.length; i += 1) {
+    const char = text[i];
+    const next = text[i + 1];
+    if (quoted) {
+      if (char === '"' && next === '"') {
+        fieldValue += '"';
+        i += 1;
+      } else if (char === '"') {
+        quoted = false;
+      } else {
+        fieldValue += char;
+      }
+    } else if (char === '"') {
+      quoted = true;
+    } else if (char === ",") {
+      row.push(fieldValue);
+      fieldValue = "";
+    } else if (char === "\n") {
+      row.push(fieldValue);
+      if (row.some((cell) => cell !== "")) rows.push(row);
+      row = [];
+      fieldValue = "";
+    } else if (char !== "\r") {
+      fieldValue += char;
+    }
+  }
+  row.push(fieldValue);
+  if (row.some((cell) => cell !== "")) rows.push(row);
+  return rows;
+}
+
+function parseImportNumber(value) {
+  const raw = cleanImport(value);
+  if (!raw) return 0;
+  const onlyNumber = raw.replace(/[^\d,.-]/g, "");
+  const comma = onlyNumber.lastIndexOf(",");
+  const dot = onlyNumber.lastIndexOf(".");
+  const normalized = comma > dot ? onlyNumber.replace(/\./g, "").replace(",", ".") : onlyNumber.replace(/,/g, "");
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function normalizeImportDate(value) {
+  const raw = cleanImport(value);
+  if (!raw) return "";
+  const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+  const br = raw.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+  if (br) return `${br[3]}-${br[2]}-${br[1]}`;
+  return raw.slice(0, 10);
+}
+
+function mapContractStatus(value, endDate) {
+  const raw = removeAccents(cleanImport(value)).toLowerCase();
+  if (raw.includes("arquivado") || raw.includes("encerrado") || raw.includes("cancelado") || raw.includes("perdido")) return "red";
+  if (raw.includes("proximo") || raw.includes("vencimento")) return "yellow";
+  if (raw.includes("renovado") || raw.includes("vigente")) return "green";
+  const end = normalizeImportDate(endDate);
+  if (end && end < today()) return "red";
+  return "cyan";
+}
+
+function mapConsultant(value) {
+  const raw = removeAccents(cleanImport(value)).toLowerCase();
+  if (raw.includes("steven")) return "Steven Passos";
+  if (raw.includes("diego")) return "Diego Pereira";
+  if (raw.includes("digitalcompasso")) return "Digital Compasso";
+  if (raw.includes("mariana")) return "Mariana Costa";
+  if (raw.includes("rafael")) return "Rafael Lima";
+  return "Equipe comercial";
+}
+
+function mapConsultantRole(value) {
+  const raw = removeAccents(cleanImport(value)).toLowerCase();
+  if (raw.includes("administr")) return "Administrador";
+  if (raw.includes("gestor")) return "Gestor";
+  if (raw.includes("comercial")) return "Consultor Comercial";
+  if (raw.includes("negocio")) return "Consultor de Negocios";
+  if (raw.includes("financeiro")) return "Financeiro";
+  return "Consultor";
+}
+
+function mapOrganizationType(value) {
+  const raw = removeAccents(cleanImport(value)).toLowerCase();
+  if (raw.includes("prefeitura")) return "Prefeitura";
+  if (raw.includes("camara")) return "Camara";
+  if (raw.includes("consorcio")) return "Consorcio";
+  if (raw.includes("instituto")) return "Instituto";
+  if (raw.includes("autarquia")) return "Autarquia";
+  if (raw.includes("fundacao")) return "Fundacao";
+  return cleanImport(value) || "Outro";
+}
+
+function importBool(value) {
+  const raw = removeAccents(cleanImport(value)).toLowerCase();
+  return ["true", "sim", "s", "1", "yes"].includes(raw);
+}
+
+function cleanImport(value) {
+  return String(value ?? "").trim();
+}
+
+function removeAccents(value) {
+  return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 }
 
 function simulateAi(action) {
