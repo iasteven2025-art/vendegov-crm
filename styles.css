@@ -1006,6 +1006,65 @@ h3 {
   text-transform: uppercase;
 }
 
+.legal-monitor {
+  display: grid;
+  gap: 12px;
+  border: 1px solid #d8e7f6;
+  border-radius: 8px;
+  padding: 14px;
+  background: #f8fbff;
+}
+
+.legal-monitor.inline {
+  margin-top: 14px;
+  background: #fbfdff;
+}
+
+.legal-monitor.compact {
+  background: var(--paper);
+}
+
+.legal-monitor-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.legal-monitor-head strong,
+.legal-monitor-head span {
+  display: block;
+}
+
+.legal-monitor-head strong {
+  color: var(--navy);
+}
+
+.legal-monitor-head span {
+  margin-top: 2px;
+  color: #697b91;
+  font-size: 12px;
+}
+
+.legal-monitor-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.legal-monitor p {
+  margin: 0;
+  color: #435468;
+  line-height: 1.45;
+}
+
+.legal-monitor ul {
+  margin: 0;
+  padding-left: 18px;
+  color: #5d6f84;
+  line-height: 1.5;
+}
+
 .client-mini-card,
 .client-ai-panel {
   padding: 16px;
@@ -1594,6 +1653,7 @@ h3 {
   .metric-grid,
   .client-metrics,
   .client-card-grid,
+  .legal-monitor-grid,
   .kanban,
   .module-grid,
   .ai-flow,
