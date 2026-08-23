@@ -158,6 +158,15 @@ const schemas = {
       field("proposedEnd", "Nova vigencia proposta", "date"),
       field("addendumNumber", "Numero do aditivo", "text"),
       field("regularityChecklist", "Checklist documental", "textarea"),
+      field("clientEmail", "E-mail do cliente", "email"),
+      field("consultantEmail", "Copia para consultor", "email"),
+      field("emailStatus", "Status do envio", "select", true, [["pending", "Pendente"], ["ready", "Carta pronta"], ["queued", "Na fila"], ["sent", "Enviada"], ["blocked", "Bloqueada"]]),
+      field("letterSubject", "Assunto da carta", "text"),
+      field("letterDraft", "Carta de renovacao", "textarea"),
+      field("letterGeneratedAt", "Carta gerada em", "date"),
+      field("emailQueuedAt", "Envio na fila em", "date"),
+      field("letterSentAt", "Carta enviada em", "date"),
+      field("followUpAt", "Ultimo acompanhamento", "date"),
       field("stage", "Etapa", "select", true, ["Mapeada", "Em contato", "Proposta enviada", "Negociacao", "Renovada", "Perdida"]),
       field("status", "Status", "select", true, [["green", "Renovada"], ["cyan", "Em andamento"], ["yellow", "Atencao"], ["red", "Risco"]]),
       field("renewalDate", "Data limite", "date"),
@@ -519,6 +528,7 @@ function emptyDb() {
     clean[key] = [];
   });
   clean.audit = [];
+  clean.notificacoes = [];
   return clean;
 }
 
@@ -578,9 +588,10 @@ async function enterSystem(email, password) {
     const remoteDb = await cloud().loadDb(emptyDb());
     db = isDemoDb(remoteDb) ? emptyDb() : { ...emptyDb(), ...remoteDb };
     const renewed = syncAllContractRenewals();
+    const automated = await processRenewalAutomation({ generateLetters: true });
     if (isDemoDb(remoteDb)) {
       await cloud().saveDb(db);
-    } else if (renewed) {
+    } else if (renewed || automated) {
       await cloud().saveDb(db);
     }
     setCloudStatus(`Firebase conectado: ${user.email || "usuario autenticado"}.`);
@@ -695,6 +706,7 @@ function render() {
   if (state.view === "dashboard") return renderDashboard();
   if (state.view === "cliente") return renderClientDetail();
   if (state.view === "ia") return renderAi();
+  if (state.view === "renovacoes") return renderRenewals();
   if (state.view === "relatorios") return renderReports();
   if (state.view === "configuracoes") return renderSettings();
   return renderCrud(state.view);
@@ -819,6 +831,146 @@ function renderCrud(moduleKey) {
     renderCrud(moduleKey);
   });
   bindDynamicActions();
+}
+
+function renderRenewals() {
+  const schema = schemas.renovacoes;
+  const pending = filtered(pendingRenewals(90));
+  const allRows = filtered(db.renovacoes || []);
+  const notifications = (db.notificacoes || []).slice(0, 12);
+  const critical = pending.filter((item) => renewalDaysRemaining(item) <= 30).length;
+  const readyLetters = (db.renovacoes || []).filter((item) => item.emailStatus === "ready").length;
+  const blockedLetters = (db.renovacoes || []).filter((item) => item.emailStatus === "blocked").length;
+  const openNotifications = (db.notificacoes || []).filter((item) => !item.read).length;
+  el.content.innerHTML = `
+    <div class="metric-grid">
+      ${metric("Pendencias 90 dias", pending.length, "renovacoes abertas")}
+      ${metric("Criticas", critical, "ate 30 dias ou vencidas")}
+      ${metric("Cartas prontas", readyLetters, `${blockedLetters} sem e-mail do cliente`)}
+      ${metric("Notificacoes", openNotifications, "avisos de 60, 45 e 30 dias")}
+    </div>
+    <section class="table-panel">
+      <div class="table-toolbar">
+        <div>
+          <h2>Pendencias dos proximos 90 dias</h2>
+          <p>Contratos com vigencia a vencer, marcos de aviso e carta automatica em 15 dias sem acompanhamento.</p>
+        </div>
+        <div class="toolbar-controls">
+          <button class="secondary-button" data-run-renewal-automation type="button">Atualizar alertas</button>
+          <button class="primary-button" data-add="renovacoes" type="button">Nova renovacao</button>
+        </div>
+      </div>
+      ${pending.length ? simpleTable(["Cliente", "Contrato", "Vencimento", "Marco", "Acompanhamento", "Carta", "Acoes"], pending.map(renewalPendingRow)) : `<div class="empty-state">Nenhuma pendencia de renovacao nos proximos 90 dias.</div>`}
+    </section>
+    <div class="grid-2">
+      <section class="panel renewal-rules">
+        <div class="panel-header">
+          <div><h2>Regra automatica</h2><p>O sistema monitora a vigencia e prepara a comunicacao antes do vencimento.</p></div>
+        </div>
+        <div class="automation-steps">
+          ${automationStep("60", "Primeiro aviso", "abre notificacao preventiva")}
+          ${automationStep("45", "Segundo aviso", "reforca tratativa comercial")}
+          ${automationStep("30", "Aviso critico", "prioriza decisao e documentos")}
+          ${automationStep("15", "Carta automatica", "gera minuta se nao houver acompanhamento")}
+        </div>
+      </section>
+      <section class="panel">
+        <div class="panel-header">
+          <div><h2>Notificacoes geradas</h2><p>Historico dos avisos criados pela rotina de renovacao.</p></div>
+        </div>
+        ${renewalNotificationsTable(notifications)}
+      </section>
+    </div>
+    <section class="table-panel">
+      <div class="table-toolbar">
+        <div><h2>${schema.title}</h2><p>${schema.desc}</p></div>
+        <div class="toolbar-controls">
+          <select class="select" id="statusFilter" aria-label="Filtrar status">
+            <option value="todos">Todos os status</option>
+            <option value="green">Renovadas</option>
+            <option value="cyan">Em andamento</option>
+            <option value="yellow">Atencao</option>
+            <option value="red">Risco</option>
+          </select>
+          <button class="primary-button" data-add="renovacoes" type="button">Nova renovacao</button>
+        </div>
+      </div>
+      ${allRows.length ? crudTable("renovacoes", allRows) : `<div class="empty-state">Nenhuma renovacao cadastrada.</div>`}
+    </section>
+  `;
+  const filter = document.querySelector("#statusFilter");
+  filter.value = state.status;
+  filter.addEventListener("change", (event) => {
+    state.status = event.target.value;
+    renderRenewals();
+  });
+  bindDynamicActions();
+}
+
+function renewalPendingRow(item) {
+  const days = renewalDaysRemaining(item);
+  const endDate = item.currentEnd || item.renewalDate;
+  const letter = item.letterDraft
+    ? emailStatusBadge(item.emailStatus)
+    : `<span class="status status-cyan">Nao gerada</span>`;
+  return [
+    mainCell(item.client, item.clientEmail || "sem e-mail do cliente"),
+    mainCell(item.contract || item.name, item.legalRegime || item.addendumType),
+    `${date(endDate)}<br><span class="record-subtitle">${daysLabel(days)}</span>`,
+    renewalWindowBadge(days),
+    mainCell(item.stage || "-", item.followUpAt ? `ultimo: ${date(item.followUpAt)}` : "sem acompanhamento manual"),
+    letter,
+    renewalRowActions(item),
+  ];
+}
+
+function renewalWindowBadge(days) {
+  if (days < 0) return `<span class="status status-red">Vencido</span>`;
+  if (days <= 15) return `<span class="status status-red">Carta automatica</span>`;
+  if (days <= 30) return `<span class="status status-red">Aviso 30 dias</span>`;
+  if (days <= 45) return `<span class="status status-yellow">Aviso 45 dias</span>`;
+  if (days <= 60) return `<span class="status status-yellow">Aviso 60 dias</span>`;
+  return `<span class="status status-cyan">Monitorar</span>`;
+}
+
+function emailStatusBadge(status) {
+  const map = {
+    pending: ["cyan", "Pendente"],
+    ready: ["yellow", "Carta pronta"],
+    queued: ["cyan", "Na fila"],
+    sent: ["green", "Enviada"],
+    blocked: ["red", "Bloqueada"],
+  };
+  const [color, label] = map[status] || ["cyan", status || "Pendente"];
+  return `<span class="status status-${color}">${escapeHtml(label)}</span>`;
+}
+
+function renewalRowActions(item) {
+  const emailAction = item.letterDraft
+    ? item.clientEmail
+      ? `<button class="mini-button" data-renewal-email="${escapeAttr(item.id)}" type="button">Enviar</button>`
+      : `<button class="mini-button" data-edit="${escapeAttr(item.id)}" data-module="renovacoes" type="button">Completar e-mail</button>`
+    : `<button class="mini-button" data-renewal-generate="${escapeAttr(item.id)}" type="button">Gerar carta</button>`;
+  const sentAction = item.letterDraft && item.emailStatus !== "sent"
+    ? `<button class="mini-button" data-renewal-mark-sent="${escapeAttr(item.id)}" type="button">Marcar enviada</button>`
+    : "";
+  return `<div class="row-actions"><button class="mini-button" data-open="${escapeAttr(item.id)}" data-module="renovacoes" type="button">Abrir</button>${emailAction}${sentAction}</div>`;
+}
+
+function renewalNotificationsTable(notifications) {
+  const rows = notifications.map((item) => [
+    mainCell(item.title, item.message),
+    item.client || "-",
+    item.contract || "-",
+    item.milestone ? `${item.milestone} dias` : "-",
+    date(item.dueDate),
+    badge(item.status || "cyan"),
+  ]);
+  return simpleTable(["Aviso", "Cliente", "Contrato", "Marco", "Vencimento", "Status"], rows);
+}
+
+function automationStep(number, title, description) {
+  return `<div class="automation-step"><span>${number}</span><div><strong>${title}</strong><small>${description}</small></div></div>`;
 }
 
 function openClientDetail(id) {
@@ -1039,6 +1191,9 @@ function syncContractRenewal(contract) {
     item.contractId === contract.id ||
     (sameText(item.contract, contract.name) && sameText(item.client, contract.client))
   ));
+  const existing = existingIndex >= 0 ? db.renovacoes[existingIndex] : {};
+  const contacts = renewalContacts(existing, contract);
+  const hasTracking = renewalHasManualFollowUp(existing);
   const payload = {
     name: `Renovacao ${contract.name || "contrato"}`,
     client: contract.client,
@@ -1052,14 +1207,22 @@ function syncContractRenewal(contract) {
     proposedEnd: "",
     addendumNumber: nextAddendumLabel(contract),
     regularityChecklist: assessment.checklist.join("\n"),
-    stage: assessment.stage,
-    status: assessment.status,
+    clientEmail: existing.clientEmail || contacts.clientEmail,
+    consultantEmail: existing.consultantEmail || contacts.consultantEmail,
+    emailStatus: existing.emailStatus || "pending",
+    letterSubject: existing.letterSubject || "",
+    letterDraft: existing.letterDraft || "",
+    letterGeneratedAt: existing.letterGeneratedAt || "",
+    emailQueuedAt: existing.emailQueuedAt || "",
+    letterSentAt: existing.letterSentAt || "",
+    followUpAt: existing.followUpAt || "",
+    stage: hasTracking ? existing.stage || assessment.stage : assessment.stage,
+    status: hasTracking ? existing.status || assessment.status : assessment.status,
     renewalDate: contract.renewal || assessment.actionDate || contract.end,
-    owner: contract.owner || currentUserLabel() || "Equipe comercial",
-    notes: assessment.message,
+    owner: existing.owner || contract.owner || currentUserLabel() || "Equipe comercial",
+    notes: hasTracking ? existing.notes || assessment.message : assessment.message,
   };
   if (existingIndex >= 0) {
-    const existing = db.renovacoes[existingIndex];
     const hasChanges = Object.keys(payload).some((key) => String(existing[key] ?? "") !== String(payload[key] ?? ""));
     if (!hasChanges) return existing;
     db.renovacoes[existingIndex] = {
@@ -1086,6 +1249,293 @@ function syncAllContractRenewals() {
     if (JSON.stringify(contract) !== contractBefore || JSON.stringify(db.renovacoes || []) !== before) changed += 1;
   });
   return changed;
+}
+
+async function processRenewalAutomation({ generateLetters = false } = {}) {
+  db.renovacoes = db.renovacoes || [];
+  db.notificacoes = db.notificacoes || [];
+  let changed = 0;
+  for (const renewal of db.renovacoes) {
+    const days = renewalDaysRemaining(renewal);
+    if (!Number.isFinite(days)) continue;
+    const milestone = renewalNotificationMilestone(days);
+    if (milestone && ensureRenewalNotification(renewal, milestone, days)) changed += 1;
+    if (generateLetters && shouldAutoGenerateRenewalLetter(renewal, days)) {
+      const generated = await generateAutomaticRenewalLetter(renewal);
+      if (generated) changed += 1;
+    }
+    if (generateLetters && shouldQueueRenewalLetter(renewal, days)) {
+      const queued = await queueRenewalLetter(renewal);
+      if (queued) changed += 1;
+    }
+  }
+  if (changed) {
+    db.notificacoes.sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
+  }
+  return changed;
+}
+
+function renewalDaysRemaining(renewal) {
+  const endDate = renewal?.currentEnd || renewal?.renewalDate;
+  if (!endDate) return Number.NaN;
+  return daysUntil(endDate);
+}
+
+function renewalNotificationMilestone(days) {
+  if (days < 0 || days > 60) return null;
+  return [30, 45, 60].find((milestone) => days <= milestone) || null;
+}
+
+function ensureRenewalNotification(renewal, milestone, days) {
+  const endDate = renewal.currentEnd || renewal.renewalDate;
+  const key = `contract-expiry:${renewal.id || renewal.contractId}:${milestone}`;
+  const exists = (db.notificacoes || []).some((item) => item.key === key);
+  if (exists) return false;
+  const notification = record({
+    key,
+    type: "contract-expiry",
+    title: `Contrato vence em ${milestone} dias`,
+    message: `${renewal.contract || renewal.name || "Contrato"} - ${renewal.client || "cliente"} (${daysLabel(days)}).`,
+    client: renewal.client || "",
+    contract: renewal.contract || renewal.name || "",
+    renewalId: renewal.id || "",
+    contractId: renewal.contractId || "",
+    milestone,
+    dueDate: endDate,
+    status: milestone <= 30 ? "red" : "yellow",
+    read: false,
+  });
+  db.notificacoes.unshift(notification);
+  return true;
+}
+
+function shouldAutoGenerateRenewalLetter(renewal, days) {
+  if (days < 0 || days > 15) return false;
+  if (renewal.letterGeneratedAt || renewal.letterDraft || renewal.emailStatus === "sent") return false;
+  if (renewal.stage === "Renovada" || renewal.stage === "Perdida") return false;
+  return !renewalHasManualFollowUp(renewal);
+}
+
+function shouldQueueRenewalLetter(renewal, days) {
+  if (days < 0 || days > 15) return false;
+  if (!renewal.letterDraft || !renewal.clientEmail) return false;
+  if (renewal.emailQueuedAt || ["queued", "sent"].includes(renewal.emailStatus)) return false;
+  return true;
+}
+
+async function queueRenewalLetter(renewal) {
+  if (!cloudEnabled() || !cloud()?.queueEmail) return false;
+  const contract = findContractForRenewal(renewal) || {};
+  try {
+    const queuedId = await cloud().queueEmail({
+      type: "renewal",
+      renewalId: renewal.id || "",
+      contractId: renewal.contractId || contract.id || "",
+      to: renewal.clientEmail,
+      cc: renewal.consultantEmail,
+      subject: renewal.letterSubject || renewalLetterSubject(contract, renewal),
+      body: renewal.letterDraft,
+      client: renewal.client,
+      contract: renewal.contract || contract.name,
+    });
+    if (!queuedId) return false;
+    renewal.emailStatus = "queued";
+    renewal.emailQueuedAt = today();
+    renewal.emailQueueId = queuedId;
+    renewal.updatedAt = now();
+    ensureQueuedNotification(renewal);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function ensureQueuedNotification(renewal) {
+  const key = `renewal-email-queued:${renewal.id || renewal.contractId}`;
+  const exists = (db.notificacoes || []).some((item) => item.key === key);
+  if (exists) return false;
+  db.notificacoes.unshift(record({
+    key,
+    type: "renewal-email-queued",
+    title: "Carta colocada na fila de envio",
+    message: `${renewal.contract || renewal.name || "Contrato"} - ${renewal.client || "cliente"}.`,
+    client: renewal.client || "",
+    contract: renewal.contract || renewal.name || "",
+    renewalId: renewal.id || "",
+    contractId: renewal.contractId || "",
+    dueDate: renewal.currentEnd || renewal.renewalDate || "",
+    status: "cyan",
+    read: false,
+  }));
+  return true;
+}
+
+function renewalHasManualFollowUp(renewal = {}) {
+  const stage = cleanImport(renewal.stage);
+  if (renewal.followUpAt) return true;
+  if (["Proposta enviada", "Negociacao", "Renovada", "Perdida"].includes(stage)) return true;
+  return hasManualRenewalNotes(renewal.notes);
+}
+
+function hasManualRenewalNotes(notes) {
+  const text = normalizeText(notes);
+  if (!text) return false;
+  const systemMarkers = [
+    "contrato monitorado",
+    "dentro da janela de renovacao",
+    "vencimento critico",
+    "contrato vencido",
+    "prazo maximo estimado",
+    "a natureza informada exige atencao",
+    "informe a data fim",
+  ];
+  return !systemMarkers.some((marker) => text.includes(marker));
+}
+
+async function generateAutomaticRenewalLetter(renewal, { force = false } = {}) {
+  if (!renewal || (!force && renewal.letterDraft)) return false;
+  const contract = findContractForRenewal(renewal) || {};
+  const contacts = renewalContacts(renewal, contract);
+  const enrichedRenewal = { ...renewal, ...contacts, currentEnd: renewal.currentEnd || contract.end };
+  let draft = "";
+  if (cloudEnabled() && cloud()?.generateRenewalLetter) {
+    try {
+      draft = await cloud().generateRenewalLetter(contract, enrichedRenewal);
+    } catch {
+      draft = "";
+    }
+  }
+  if (!draft) draft = renewalLetterTemplate(contract, enrichedRenewal);
+  renewal.clientEmail = renewal.clientEmail || contacts.clientEmail;
+  renewal.consultantEmail = renewal.consultantEmail || contacts.consultantEmail;
+  renewal.letterSubject = renewalLetterSubject(contract, renewal);
+  renewal.letterDraft = draft;
+  renewal.letterGeneratedAt = today();
+  renewal.emailStatus = renewal.clientEmail ? "ready" : "blocked";
+  renewal.updatedAt = now();
+  ensureLetterNotification(renewal);
+  return true;
+}
+
+function ensureLetterNotification(renewal) {
+  const key = `renewal-letter:${renewal.id || renewal.contractId}`;
+  const exists = (db.notificacoes || []).some((item) => item.key === key);
+  if (exists) return false;
+  db.notificacoes.unshift(record({
+    key,
+    type: "renewal-letter",
+    title: renewal.clientEmail ? "Carta de renovacao pronta" : "Carta gerada sem e-mail do cliente",
+    message: `${renewal.contract || renewal.name || "Contrato"} - ${renewal.client || "cliente"}.`,
+    client: renewal.client || "",
+    contract: renewal.contract || renewal.name || "",
+    renewalId: renewal.id || "",
+    contractId: renewal.contractId || "",
+    dueDate: renewal.currentEnd || renewal.renewalDate || "",
+    status: renewal.clientEmail ? "yellow" : "red",
+    read: false,
+  }));
+  return true;
+}
+
+function renewalContacts(renewal = {}, contract = {}) {
+  const client = findClientForRenewal(renewal, contract);
+  const owner = renewal.owner || contract.owner || client?.owner || currentUserLabel();
+  return {
+    client,
+    clientContact: client?.contact || "",
+    clientEmail: cleanImport(renewal.clientEmail) || cleanImport(client?.email),
+    consultantEmail: cleanImport(renewal.consultantEmail) || findConsultantEmail(owner),
+    consultantName: owner || "Equipe comercial",
+  };
+}
+
+function findClientForRenewal(renewal = {}, contract = {}) {
+  const clientName = cleanImport(renewal.client) || cleanImport(contract.client) || cleanImport(contract.agency);
+  return (db.clientes || []).find((client) => (
+    (renewal.clientId && client.id === renewal.clientId) ||
+    (contract.clientId && client.id === contract.clientId) ||
+    sameText(client.name, clientName) ||
+    sameText(client.originalName, clientName) ||
+    sameText(client.name, contract.agency) ||
+    sameText(client.originalName, contract.agency)
+  )) || null;
+}
+
+function findConsultantEmail(owner) {
+  const raw = cleanImport(owner);
+  if (raw.includes("@")) return raw;
+  const user = (db.usuarios || []).find((item) => sameText(item.name, raw) || sameText(item.email, raw));
+  return cleanImport(user?.email);
+}
+
+function findContractForRenewal(renewal = {}) {
+  return (db.contratos || []).find((contract) => (
+    (renewal.contractId && contract.id === renewal.contractId) ||
+    sameText(contract.name, renewal.contract) ||
+    (sameText(contract.client, renewal.client) && sameText(contract.end, renewal.currentEnd))
+  )) || null;
+}
+
+function pendingRenewals(days = 90) {
+  return (db.renovacoes || [])
+    .filter((renewal) => {
+      const remaining = renewalDaysRemaining(renewal);
+      if (!Number.isFinite(remaining)) return false;
+      if (renewal.stage === "Renovada" || renewal.emailStatus === "sent") return false;
+      return remaining <= days;
+    })
+    .sort((a, b) => renewalDaysRemaining(a) - renewalDaysRemaining(b));
+}
+
+function renewalLetterSubject(contract = {}, renewal = {}) {
+  const number = contract.name || renewal.contract || renewal.name || "contrato";
+  return `Renovacao contratual - ${number}`;
+}
+
+function renewalLetterTemplate(contract = {}, renewal = {}) {
+  const contacts = renewalContacts(renewal, contract);
+  const client = renewal.client || contract.client || contract.agency || "cliente";
+  const contractName = contract.name || renewal.contract || "contrato em vigor";
+  const endDate = renewal.currentEnd || contract.end || renewal.renewalDate;
+  const value = Number(renewal.value || contract.monthly || 0);
+  const checklist = cleanImport(renewal.regularityChecklist)
+    .split("\n")
+    .map((item) => cleanImport(item))
+    .filter(Boolean)
+    .slice(0, 5);
+  return [
+    `Assunto: ${renewalLetterSubject(contract, renewal)}`,
+    "",
+    `Prezados${contacts.clientContact ? `, ${contacts.clientContact}` : ""},`,
+    "",
+    `Identificamos que o ${contractName}, vinculado a ${client}, possui vigencia prevista ate ${date(endDate)}. Para evitar descontinuidade operacional, sugerimos iniciar imediatamente a tratativa de renovacao contratual/aditivo.`,
+    "",
+    `Resumo da tratativa:`,
+    `- Contrato: ${contractName}`,
+    `- Cliente/orgao: ${client}`,
+    `- Base legal monitorada: ${renewal.legalRegime || contract.legalRegime || "conforme contrato"}`,
+    `- Valor mensal de referencia: ${money(value)}`,
+    `- Vencimento: ${date(endDate)}`,
+    "",
+    `Proximos passos recomendados:`,
+    ...(checklist.length ? checklist.map((item) => `- ${item}`) : [
+      "- Confirmar interesse na continuidade do contrato.",
+      "- Validar documentacao, regularidade fiscal e justificativa de vantagem.",
+      "- Preparar minuta do termo aditivo antes do vencimento.",
+    ]),
+    "",
+    "Ficamos a disposicao para alinhar escopo, prazos e documentos necessarios.",
+    "",
+    "Atenciosamente,",
+    contacts.consultantName || "Equipe VendeGov",
+  ].join("\n");
+}
+
+function daysLabel(days) {
+  if (!Number.isFinite(days)) return "-";
+  if (days < 0) return `${Math.abs(days)} dia(s) vencido`;
+  if (days === 0) return "vence hoje";
+  return `${days} dia(s)`;
 }
 
 function contractLegalAssessment(contract) {
@@ -1344,6 +1794,7 @@ function openContractRenewalForm(contractId) {
   const contract = (db.contratos || []).find((item) => item.id === contractId);
   if (!contract) return;
   const assessment = contractLegalAssessment(contract);
+  const contacts = renewalContacts({}, contract);
   openForm("renovacoes", null, {
     name: `Renovacao ${contract.name || ""}`.trim(),
     client: contract.client,
@@ -1357,6 +1808,9 @@ function openContractRenewalForm(contractId) {
     proposedEnd: "",
     addendumNumber: nextAddendumLabel(contract),
     regularityChecklist: assessment.checklist.join("\n"),
+    clientEmail: contacts.clientEmail,
+    consultantEmail: contacts.consultantEmail,
+    emailStatus: "pending",
     renewalDate: contract.renewal || contract.end,
     stage: assessment.stage,
     status: assessment.status,
@@ -1684,6 +2138,10 @@ function bindDynamicActions() {
   document.querySelectorAll("[data-ai-read-contract]").forEach((button) => button.addEventListener("click", () => analyzeStoredContractPdf(button.dataset.aiReadContract)));
   document.querySelectorAll("[data-ai-letter-contract]").forEach((button) => button.addEventListener("click", () => generateRenewalLetterForContractId(button.dataset.aiLetterContract)));
   document.querySelectorAll("[data-ai-letter-renewal]").forEach((button) => button.addEventListener("click", () => generateRenewalLetterForRenewalId(button.dataset.aiLetterRenewal)));
+  document.querySelectorAll("[data-run-renewal-automation]").forEach((button) => button.addEventListener("click", refreshRenewalAutomation));
+  document.querySelectorAll("[data-renewal-generate]").forEach((button) => button.addEventListener("click", () => generateStoredRenewalLetter(button.dataset.renewalGenerate)));
+  document.querySelectorAll("[data-renewal-email]").forEach((button) => button.addEventListener("click", () => emailRenewalLetter(button.dataset.renewalEmail)));
+  document.querySelectorAll("[data-renewal-mark-sent]").forEach((button) => button.addEventListener("click", () => markRenewalLetterSent(button.dataset.renewalMarkSent)));
   const contractSelect = document.querySelector("#aiContractSelect");
   if (contractSelect) {
     contractSelect.addEventListener("change", (event) => {
@@ -1711,6 +2169,75 @@ function bindDynamicActions() {
     state.configTab = button.dataset.config;
     renderSettings();
   }));
+}
+
+async function refreshRenewalAutomation() {
+  const changed = await processRenewalAutomation({ generateLetters: true });
+  if (changed) {
+    saveDb("Atualizou alertas de renovacao", `${changed} alteracao(oes) geradas`);
+    toast("Alertas e cartas atualizados.");
+  } else {
+    toast("Renovacoes conferidas. Nenhuma nova pendencia.");
+  }
+  renderRenewals();
+}
+
+async function generateStoredRenewalLetter(id) {
+  const renewal = (db.renovacoes || []).find((item) => item.id === id);
+  if (!renewal) return;
+  await generateAutomaticRenewalLetter(renewal, { force: true });
+  saveDb("Gerou carta automatica", renewal.contract || renewal.name || id);
+  render();
+  toast(renewal.clientEmail ? "Carta pronta para envio." : "Carta gerada. Complete o e-mail do cliente.");
+}
+
+async function emailRenewalLetter(id) {
+  let renewal = (db.renovacoes || []).find((item) => item.id === id);
+  if (!renewal) return;
+  if (!renewal.letterDraft) {
+    await generateAutomaticRenewalLetter(renewal, { force: true });
+    saveDb("Gerou carta automatica", renewal.contract || renewal.name || id);
+  }
+  renewal = (db.renovacoes || []).find((item) => item.id === id);
+  if (!renewal.clientEmail) {
+    renewal.emailStatus = "blocked";
+    saveDb("Bloqueou envio de renovacao", "Cliente sem e-mail cadastrado");
+    openForm("renovacoes", id);
+    toast("Complete o e-mail do cliente para enviar.");
+    return;
+  }
+  const link = renewalMailtoLink(renewal);
+  if (!link) {
+    toast("Nao foi possivel montar o e-mail.");
+    return;
+  }
+  window.location.href = link;
+  saveDb("Preparou envio de carta", renewal.contract || renewal.name || id);
+  toast("E-mail aberto. Depois marque como enviada.");
+}
+
+function markRenewalLetterSent(id) {
+  const renewal = (db.renovacoes || []).find((item) => item.id === id);
+  if (!renewal) return;
+  renewal.emailStatus = "sent";
+  renewal.letterSentAt = today();
+  renewal.followUpAt = today();
+  if (["Mapeada", "Em contato"].includes(renewal.stage)) renewal.stage = "Proposta enviada";
+  renewal.updatedAt = now();
+  saveDb("Registrou envio de carta", renewal.contract || renewal.name || id);
+  render();
+  toast("Envio registrado na renovacao.");
+}
+
+function renewalMailtoLink(renewal) {
+  const recipient = cleanImport(renewal.clientEmail);
+  if (!recipient) return "";
+  const cc = cleanImport(renewal.consultantEmail);
+  const subject = cleanImport(renewal.letterSubject) || renewalLetterSubject(findContractForRenewal(renewal) || {}, renewal);
+  const body = cleanImport(renewal.letterDraft);
+  const params = [`subject=${encodeURIComponent(subject)}`, `body=${encodeURIComponent(body)}`];
+  if (cc) params.unshift(`cc=${encodeURIComponent(cc)}`);
+  return `mailto:${encodeURIComponent(recipient)}?${params.join("&")}`;
 }
 
 function openForm(moduleKey, id = null, defaults = {}) {
@@ -1901,6 +2428,7 @@ async function submitForm(event) {
   });
   if (moduleKey === "contratos") applyContractLegalDefaults(values);
   if (moduleKey !== "contratos") linkRecordToExistingClient(values);
+  if (moduleKey === "renovacoes" && id) values.followUpAt = values.followUpAt || today();
   if (!pendingFile && moduleKey === "contratos" && state.contractFormAiFile) {
     pendingFile = state.contractFormAiFile;
   }
@@ -1923,14 +2451,22 @@ async function submitForm(event) {
   if (id) {
     const idx = db[moduleKey].findIndex((item) => item.id === id);
     db[moduleKey][idx] = { ...db[moduleKey][idx], ...values, updatedAt: now() };
-    if (moduleKey === "contratos") syncContractRenewal(db[moduleKey][idx]);
+    if (moduleKey === "contratos") {
+      syncContractRenewal(db[moduleKey][idx]);
+      await processRenewalAutomation({ generateLetters: true });
+    }
+    if (moduleKey === "renovacoes") await processRenewalAutomation({ generateLetters: true });
     saveDb(`Editou ${schemas[moduleKey].singular}`, linkedClient ? `${values.name || id} vinculado a ${linkedClient.name}` : values.name || id);
     toast("Registro atualizado.");
   } else {
     values.id = recordId;
     const created = record(values);
     db[moduleKey].unshift(created);
-    if (moduleKey === "contratos") syncContractRenewal(created);
+    if (moduleKey === "contratos") {
+      syncContractRenewal(created);
+      await processRenewalAutomation({ generateLetters: true });
+    }
+    if (moduleKey === "renovacoes") await processRenewalAutomation({ generateLetters: true });
     saveDb(`Criou ${schemas[moduleKey].singular}`, linkedClient ? `${values.name || "novo registro"} vinculado a ${linkedClient.name}` : values.name || "novo registro");
     toast("Registro criado.");
   }
@@ -1993,7 +2529,7 @@ function openDetail(moduleKey, id) {
       <div class="drawer-actions">
         <button class="primary-button" data-edit="${id}" data-module="${moduleKey}" type="button">Editar registro</button>
         ${moduleKey === "contratos" ? `<button class="secondary-button" data-ai-letter-contract="${id}" type="button">Gerar carta IA</button>` : ""}
-        ${moduleKey === "renovacoes" ? `<button class="secondary-button" data-ai-letter-renewal="${id}" type="button">Gerar carta IA</button>` : ""}
+        ${moduleKey === "renovacoes" ? renewalDrawerActions(item) : ""}
         <button class="secondary-button" data-ai="Diagnostico da carteira" type="button">Abrir IA Gemini</button>
         <button class="danger-button" data-delete="${id}" data-module="${moduleKey}" type="button">Excluir</button>
       </div>
@@ -2002,6 +2538,13 @@ function openDetail(moduleKey, id) {
   el.drawer.classList.remove("hidden");
   el.drawerBackdrop.classList.remove("hidden");
   bindDynamicActions();
+}
+
+function renewalDrawerActions(item) {
+  const generate = `<button class="secondary-button" data-ai-letter-renewal="${escapeAttr(item.id)}" type="button">Gerar carta IA</button>`;
+  const send = item.letterDraft ? `<button class="secondary-button" data-renewal-email="${escapeAttr(item.id)}" type="button">Enviar carta</button>` : "";
+  const mark = item.letterDraft && item.emailStatus !== "sent" ? `<button class="secondary-button" data-renewal-mark-sent="${escapeAttr(item.id)}" type="button">Marcar enviada</button>` : "";
+  return `${generate}${send}${mark}`;
 }
 
 function closeDrawer() {
@@ -2598,7 +3141,7 @@ function contractFromAiExtraction(data, fileName = "") {
   };
 }
 
-function saveAiDraftContract() {
+async function saveAiDraftContract() {
   if (!state.aiDraftContract) {
     toast("Nao ha contrato extraido para cadastrar.");
     return;
@@ -2608,6 +3151,7 @@ function saveAiDraftContract() {
   const item = record(state.aiDraftContract);
   db.contratos.unshift(item);
   syncContractRenewal(item);
+  await processRenewalAutomation({ generateLetters: true });
   state.aiContractId = item.id;
   state.aiDraftContract = null;
   saveDb("Cadastrou contrato por IA", item.name);
@@ -2652,6 +3196,17 @@ async function generateRenewalLetterFromSelection(contractId = state.aiContractI
   try {
     const renewal = findRenewalForContract(contract);
     state.aiLetter = await cloud().generateRenewalLetter(contract, renewal);
+    if (renewal?.id) {
+      const contacts = renewalContacts(renewal, contract);
+      renewal.clientEmail = renewal.clientEmail || contacts.clientEmail;
+      renewal.consultantEmail = renewal.consultantEmail || contacts.consultantEmail;
+      renewal.letterSubject = renewalLetterSubject(contract, renewal);
+      renewal.letterDraft = state.aiLetter;
+      renewal.letterGeneratedAt = today();
+      renewal.emailStatus = renewal.clientEmail ? "ready" : "blocked";
+      renewal.updatedAt = now();
+      ensureLetterNotification(renewal);
+    }
     saveDb("Gerou carta de renovacao", contract.name || contract.id);
     toast("Carta de renovacao gerada.");
   } catch (error) {
@@ -2670,19 +3225,26 @@ async function generateRenewalLetterForContractId(id) {
 
 async function generateRenewalLetterForRenewalId(id) {
   const renewal = (db.renovacoes || []).find((item) => item.id === id);
-  const contract = (db.contratos || []).find((item) => sameText(item.name, renewal?.contract) || sameText(item.client, renewal?.client));
+  const contract = findContractForRenewal(renewal || {});
   if (!contract) {
     setView("ia");
     toast("Nao encontrei o contrato vinculado a esta renovacao.");
     return;
   }
+  await generateAutomaticRenewalLetter(renewal, { force: true });
+  saveDb("Gerou carta de renovacao", contract.name || contract.id);
   state.aiContractId = contract.id;
+  state.aiLetter = renewal.letterDraft || "";
   setView("ia");
-  await generateRenewalLetterFromSelection(contract.id);
+  toast("Carta salva na renovacao.");
 }
 
 function findRenewalForContract(contract) {
-  return (db.renovacoes || []).find((item) => sameText(item.contract, contract.name) || sameText(item.client, contract.client)) || {};
+  return (db.renovacoes || []).find((item) => (
+    item.contractId === contract.id ||
+    sameText(item.contract, contract.name) ||
+    (sameText(item.client, contract.client) && sameText(item.currentEnd, contract.end))
+  )) || {};
 }
 
 function sameText(a, b) {
