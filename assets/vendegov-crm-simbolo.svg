@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-label="VendeGov CRM simbolo">
+  <rect x="16" y="16" width="224" height="224" rx="54" fill="#0B1F33"/>
+  <path d="M69 154 C68 91 115 52 172 59 C205 63 225 88 229 121" fill="none" stroke="#19A7A8" stroke-opacity="0.56" stroke-width="16" stroke-linecap="round"/>
+  <path d="M67 156 L116 205 L222 72" fill="none" stroke="#1FAF72" stroke-width="29" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="222" cy="72" r="15" fill="#19A7A8" stroke="#0B1F33" stroke-width="8"/>
+</svg>
