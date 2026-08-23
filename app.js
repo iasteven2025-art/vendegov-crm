@@ -9,8 +9,9 @@ const modules = [
   ["documentos", "07", "Entrega docs", "Carteira"],
   ["renovacoes", "08", "Renovacoes", "Carteira"],
   ["comissoes", "09", "Comissoes", "Financeiro"],
-  ["relatorios", "10", "Relatorios", "Relatorios"],
-  ["configuracoes", "11", "Parametros", "Parametrizacao"],
+  ["ia", "10", "IA Gemini", "Automacao"],
+  ["relatorios", "11", "Relatorios", "Relatorios"],
+  ["configuracoes", "12", "Parametros", "Parametrizacao"],
 ];
 
 const statusOptions = [
@@ -347,6 +348,12 @@ const state = {
   configTab: "usuarios",
   editing: null,
   deleteTarget: null,
+  aiBusy: "",
+  aiFocus: "",
+  aiContractId: "",
+  aiDraftContract: null,
+  aiLastExtraction: null,
+  aiLetter: "",
 };
 
 let db = emptyDb();
@@ -663,8 +670,9 @@ function render() {
   const meta = viewMeta(state.view);
   el.title.textContent = meta.title;
   el.kicker.textContent = meta.kicker;
-  el.newButton.disabled = state.view === "dashboard" || state.view === "relatorios";
+  el.newButton.disabled = state.view === "dashboard" || state.view === "relatorios" || state.view === "ia";
   if (state.view === "dashboard") return renderDashboard();
+  if (state.view === "ia") return renderAi();
   if (state.view === "relatorios") return renderReports();
   if (state.view === "configuracoes") return renderSettings();
   return renderCrud(state.view);
@@ -672,6 +680,7 @@ function render() {
 
 function viewMeta(view) {
   if (view === "dashboard") return { title: "Painel executivo", kicker: "Visao geral" };
+  if (view === "ia") return { title: "IA Gemini", kicker: "Automacao operacional" };
   if (view === "relatorios") return { title: "Relatorios", kicker: "Vendas, gestao e comissoes" };
   if (view === "configuracoes") return { title: "Parametrizacao", kicker: "Administracao" };
   return { title: schemas[view].title, kicker: "Modulo" };
@@ -847,6 +856,119 @@ function renderReports() {
   bindDynamicActions();
 }
 
+function renderAi() {
+  const modelName = cloud()?.aiModelName ? cloud().aiModelName() : "gemini-3.6-flash";
+  const aiOnline = cloudEnabled() && Boolean(cloud()?.aiEnabled?.());
+  const contracts = db.contratos || [];
+  const selectedId = state.aiContractId || contracts[0]?.id || "";
+  const selectedContract = contracts.find((item) => item.id === selectedId) || contracts[0] || null;
+  if (!state.aiContractId && selectedContract) state.aiContractId = selectedContract.id;
+  el.content.innerHTML = `
+    <div class="metric-grid ai-metric-grid">
+      ${metric("Status da IA", aiOnline ? "Preparada" : "Pendente", aiOnline ? "Firebase AI Logic no app" : "ative no Firebase Console")}
+      ${metric("Modelo", modelName, "Gemini via Firebase")}
+      ${metric("Contratos", contracts.length, "base disponivel para renovacao")}
+      ${metric("PDF direto", "ate 18 MB", "limite operacional seguro")}
+    </div>
+    <div class="grid-2 ai-layout">
+      <section class="panel ai-workbench">
+        <div class="panel-header">
+          <div>
+            <h2>Ler contrato em PDF</h2>
+            <p>Envie um PDF para extrair numero, orgao, objeto, valores, prazos, reajuste, obrigacoes e riscos.</p>
+          </div>
+        </div>
+        ${aiSetupNotice(aiOnline)}
+        <label class="ai-upload">
+          <span>PDF do contrato</span>
+          <input id="aiPdfInput" type="file" accept="application/pdf,.pdf,text/plain,.txt" />
+        </label>
+        <div class="drawer-actions">
+          <button class="primary-button" data-ai-analyze-pdf type="button" ${state.aiBusy ? "disabled" : ""}>${state.aiBusy === "extract" ? "Lendo documento..." : "Ler documento com IA"}</button>
+          ${state.aiDraftContract ? `<button class="secondary-button" data-ai-save-contract type="button">Cadastrar contrato extraido</button>` : ""}
+        </div>
+        ${aiExtractionResult()}
+      </section>
+      <section class="panel ai-workbench">
+        <div class="panel-header">
+          <div>
+            <h2>Carta de renovacao</h2>
+            <p>Gere uma carta pronta para iniciar ou formalizar uma renovacao contratual.</p>
+          </div>
+        </div>
+        <label class="ai-upload">
+          <span>Contrato base</span>
+          <select id="aiContractSelect">
+            ${contracts.length ? contracts.map((item) => `<option value="${escapeAttr(item.id)}" ${item.id === selectedId ? "selected" : ""}>${escapeHtml(item.name || item.client || item.id)}</option>`).join("") : `<option value="">Nenhum contrato cadastrado</option>`}
+          </select>
+        </label>
+        <div class="ai-contract-preview">
+          ${selectedContract ? `
+            <strong>${escapeHtml(selectedContract.name || "Contrato")}</strong>
+            <small>${escapeHtml(selectedContract.client || "-")} | ${money(selectedContract.value)} | vigencia ate ${date(selectedContract.end)}</small>
+          ` : `<small>Cadastre ou importe contratos para gerar cartas.</small>`}
+        </div>
+        <div class="drawer-actions">
+          <button class="primary-button" data-ai-generate-renewal type="button" ${!selectedContract || state.aiBusy ? "disabled" : ""}>${state.aiBusy === "letter" ? "Gerando carta..." : "Gerar carta de renovacao"}</button>
+          ${state.aiLetter ? `<button class="secondary-button" data-ai-copy-letter type="button">Copiar carta</button>` : ""}
+        </div>
+        ${aiLetterResult()}
+      </section>
+    </div>
+    <section class="table-panel">
+      <div class="table-toolbar">
+        <div>
+          <h2>Como a IA entra na rotina</h2>
+          <p>O VendeGov usa Gemini para transformar documentos e dados de contratos em registros e textos operacionais.</p>
+        </div>
+      </div>
+      <div class="ai-flow">
+        ${insight("01", "PDF entra na plataforma e a IA identifica campos contratuais.")}
+        ${insight("02", "Voce confere o rascunho antes de salvar no Firebase.")}
+        ${insight("03", "A carta de renovacao usa dados reais do contrato e da tratativa.")}
+        ${insight("04", "Nenhuma chave Gemini fica exposta no codigo do site.")}
+      </div>
+    </section>
+  `;
+  bindDynamicActions();
+}
+
+function aiSetupNotice(aiOnline) {
+  if (aiOnline) {
+    return `<div class="ai-notice success"><strong>Conexao preparada</strong><span>O app esta pronto para usar Firebase AI Logic. Se a primeira chamada falhar, ative AI Logic e App Check no Console Firebase.</span></div>`;
+  }
+  return `<div class="ai-notice warn"><strong>Configuracao pendente</strong><span>Ative AI Services > AI Logic no Firebase e escolha Gemini Developer API. Depois publique novamente.</span></div>`;
+}
+
+function aiExtractionResult() {
+  if (state.aiBusy === "extract") return `<div class="ai-result"><strong>Leitura em andamento</strong><p>A IA esta processando o documento. PDFs maiores podem levar alguns segundos.</p></div>`;
+  if (!state.aiDraftContract) return `<div class="empty-state">Nenhum documento analisado nesta sessao.</div>`;
+  const item = state.aiDraftContract;
+  return `
+    <div class="ai-result">
+      <div class="ai-result-header">
+        <strong>Contrato extraido</strong>
+        <span>${badge(item.status || "cyan")}</span>
+      </div>
+      <div class="detail-grid">
+        ${detailField("Contrato", escapeHtml(item.name))}
+        ${detailField("Cliente/orgao", escapeHtml(item.client))}
+        ${detailField("Valor total", money(item.value))}
+        ${detailField("Vigencia", `${date(item.start)} a ${date(item.end)}`)}
+        ${detailField("Renovacao", date(item.renewal))}
+        ${detailField("Reajuste", escapeHtml(item.adjustment || "-"))}
+      </div>
+      <pre class="ai-json-preview">${escapeHtml(JSON.stringify(state.aiLastExtraction || {}, null, 2))}</pre>
+    </div>
+  `;
+}
+
+function aiLetterResult() {
+  if (state.aiBusy === "letter") return `<div class="ai-result"><strong>Carta em producao</strong><p>A IA esta montando a carta com base nos dados do contrato.</p></div>`;
+  if (!state.aiLetter) return `<div class="empty-state">A carta gerada aparecera aqui.</div>`;
+  return `<div class="ai-result"><pre class="generated-text">${escapeHtml(state.aiLetter)}</pre></div>`;
+}
+
 function renderSettings() {
   const tabs = [
     ["empresas", "Empresas"],
@@ -898,7 +1020,22 @@ function bindDynamicActions() {
   document.querySelectorAll("[data-open]").forEach((button) => button.addEventListener("click", () => openDetail(button.dataset.module, button.dataset.open)));
   document.querySelectorAll("[data-edit]").forEach((button) => button.addEventListener("click", () => openForm(button.dataset.module, button.dataset.edit)));
   document.querySelectorAll("[data-delete]").forEach((button) => button.addEventListener("click", () => askDelete(button.dataset.module, button.dataset.delete)));
-  document.querySelectorAll("[data-ai]").forEach((button) => button.addEventListener("click", () => simulateAi(button.dataset.ai)));
+  document.querySelectorAll("[data-ai]").forEach((button) => button.addEventListener("click", () => openAiWorkspace(button.dataset.ai)));
+  document.querySelectorAll("[data-ai-analyze-pdf]").forEach((button) => button.addEventListener("click", analyzePdfFromPanel));
+  document.querySelectorAll("[data-ai-save-contract]").forEach((button) => button.addEventListener("click", saveAiDraftContract));
+  document.querySelectorAll("[data-ai-generate-renewal]").forEach((button) => button.addEventListener("click", () => generateRenewalLetterFromSelection()));
+  document.querySelectorAll("[data-ai-copy-letter]").forEach((button) => button.addEventListener("click", copyAiLetter));
+  document.querySelectorAll("[data-ai-read-contract]").forEach((button) => button.addEventListener("click", () => analyzeStoredContractPdf(button.dataset.aiReadContract)));
+  document.querySelectorAll("[data-ai-letter-contract]").forEach((button) => button.addEventListener("click", () => generateRenewalLetterForContractId(button.dataset.aiLetterContract)));
+  document.querySelectorAll("[data-ai-letter-renewal]").forEach((button) => button.addEventListener("click", () => generateRenewalLetterForRenewalId(button.dataset.aiLetterRenewal)));
+  const contractSelect = document.querySelector("#aiContractSelect");
+  if (contractSelect) {
+    contractSelect.addEventListener("change", (event) => {
+      state.aiContractId = event.target.value;
+      state.aiLetter = "";
+      renderAi();
+    });
+  }
   document.querySelectorAll("[data-import-clients]").forEach((button) => button.addEventListener("click", () => {
     el.importFile.dataset.mode = "clientes";
     el.importFile.accept = ".csv,text/csv,application/vnd.ms-excel";
@@ -1067,7 +1204,9 @@ function openDetail(moduleKey, id) {
       <h3>Operacao</h3>
       <div class="drawer-actions">
         <button class="primary-button" data-edit="${id}" data-module="${moduleKey}" type="button">Editar registro</button>
-        <button class="secondary-button" data-ai="Diagnostico da carteira" type="button">Gerar resumo IA</button>
+        ${moduleKey === "contratos" ? `<button class="secondary-button" data-ai-letter-contract="${id}" type="button">Gerar carta IA</button>` : ""}
+        ${moduleKey === "renovacoes" ? `<button class="secondary-button" data-ai-letter-renewal="${id}" type="button">Gerar carta IA</button>` : ""}
+        <button class="secondary-button" data-ai="Diagnostico da carteira" type="button">Abrir IA Gemini</button>
         <button class="danger-button" data-delete="${id}" data-module="${moduleKey}" type="button">Excluir</button>
       </div>
     </section>
@@ -1094,10 +1233,11 @@ function contractPdfSection(moduleKey, item) {
   const source = item.documentUrl
     ? `<a class="secondary-button" href="${escapeAttr(item.documentUrl)}" target="_blank" rel="noreferrer">Abrir PDF origem</a>`
     : "";
+  const readAi = `<button class="secondary-button" data-ai-read-contract="${escapeAttr(item.id)}" type="button">Ler PDF com IA</button>`;
   return `
     <section class="drawer-section">
       <h3>PDF do contrato</h3>
-      <div class="drawer-actions">${internal}${source}</div>
+      <div class="drawer-actions">${internal}${source}${readAi}</div>
     </section>
   `;
 }
@@ -1581,19 +1721,183 @@ function removeAccents(value) {
   return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 }
 
-function simulateAi(action) {
-  const messages = {
-    "Analisar edital": "IA simulada: edital analisado, 8 documentos e 3 riscos encontrados.",
-    "Preparar documentos": "IA simulada: checklist de habilitacao montado e pendencias priorizadas.",
-    "Gerar proposta": "IA simulada: proposta criada com base no template comercial.",
-    "Analisar contrato": "IA simulada: vencimento, reajuste e obrigacoes identificados.",
-    "Diagnostico da carteira": "IA simulada: carteira possui 3 alertas prioritarios.",
-    "Diagnostico digital": "IA simulada: maturidade da operacao calculada com plano de melhoria.",
-    "Relatorio de viagem": "IA simulada: visita registrada com resumo, custos e proximos passos.",
+function openAiWorkspace(action = "") {
+  state.aiFocus = action;
+  setView("ia");
+  if (action) toast(`IA pronta para: ${action}.`);
+}
+
+async function analyzePdfFromPanel() {
+  const input = document.querySelector("#aiPdfInput");
+  const file = input?.files?.[0];
+  if (!file) {
+    toast("Selecione um PDF para a IA ler.");
+    return;
+  }
+  await analyzeContractFile(file);
+}
+
+async function analyzeContractFile(file) {
+  if (!cloudEnabled() || !cloud()?.analyzeContractFile) {
+    toast("Firebase AI Logic ainda nao esta configurado.");
+    return;
+  }
+  state.aiBusy = "extract";
+  state.aiDraftContract = null;
+  state.aiLastExtraction = null;
+  renderAi();
+  try {
+    const extracted = await cloud().analyzeContractFile(file);
+    state.aiLastExtraction = extracted;
+    state.aiDraftContract = contractFromAiExtraction(extracted, file.name);
+    saveDb("Executou IA", `Leitura de contrato: ${file.name}`);
+    toast("Contrato lido pela IA. Confira antes de cadastrar.");
+  } catch (error) {
+    toast(aiErrorMessage(error));
+  } finally {
+    state.aiBusy = "";
+    renderAi();
+  }
+}
+
+function contractFromAiExtraction(data, fileName = "") {
+  const number = cleanImport(data.numero_contrato);
+  const name = number ? `Contrato ${number}` : cleanImport(data.nome) || cleanImport(fileName).replace(/\.[^.]+$/, "") || "Contrato extraido por IA";
+  const agency = cleanImport(data.orgao_comprador) || cleanImport(data.contratante);
+  const client = agency || cleanImport(data.contratada) || "Cliente nao informado";
+  const obligations = Array.isArray(data.obrigacoes_principais) ? data.obrigacoes_principais.filter(Boolean) : [];
+  const risks = Array.isArray(data.riscos) ? data.riscos.filter(Boolean) : [];
+  const notes = [
+    cleanImport(data.resumo),
+    obligations.length ? `Obrigacoes principais:\n- ${obligations.join("\n- ")}` : "",
+    risks.length ? `Riscos apontados pela IA:\n- ${risks.join("\n- ")}` : "",
+    cleanImport(data.contratada) ? `Contratada: ${cleanImport(data.contratada)}` : "",
+    cleanImport(data.cnpj_contratada) ? `CNPJ contratada: ${cleanImport(data.cnpj_contratada)}` : "",
+    fileName ? `Fonte analisada: ${fileName}` : "",
+  ];
+  return {
+    name,
+    client,
+    agency,
+    object: cleanImport(data.objeto),
+    legalBasis: cleanImport(data.fundamento_legal),
+    value: Number(data.valor_total || 0),
+    monthly: Number(data.valor_mensal || 0),
+    status: mapContractStatus("", data.data_fim),
+    start: normalizeImportDate(data.data_inicio),
+    end: normalizeImportDate(data.data_fim),
+    renewal: normalizeImportDate(data.renovacao_prevista),
+    adjustment: cleanImport(data.indice_reajuste),
+    owner: currentUserLabel() || "Equipe comercial",
+    notes: notes.filter(Boolean).join("\n\n"),
   };
-  saveDb("Executou IA", action);
-  render();
-  toast(messages[action] || "Acao inteligente simulada.");
+}
+
+function saveAiDraftContract() {
+  if (!state.aiDraftContract) {
+    toast("Nao ha contrato extraido para cadastrar.");
+    return;
+  }
+  const item = record(state.aiDraftContract);
+  db.contratos.unshift(item);
+  state.aiContractId = item.id;
+  state.aiDraftContract = null;
+  saveDb("Cadastrou contrato por IA", item.name);
+  updateLoginNumbers();
+  setView("contratos");
+  toast("Contrato cadastrado no Firebase.");
+}
+
+async function analyzeStoredContractPdf(id) {
+  const contract = (db.contratos || []).find((item) => item.id === id);
+  const url = contract?.fileUrl || contract?.documentUrl;
+  if (!contract || !url) {
+    toast("Este contrato ainda nao tem PDF para a IA ler.");
+    return;
+  }
+  setView("ia");
+  try {
+    const response = await fetch(url);
+    if (!response.ok) throw new Error("PDF indisponivel.");
+    const blob = await response.blob();
+    const file = new File([blob], contract.fileRef || `${contract.name || "contrato"}.pdf`, { type: blob.type || "application/pdf" });
+    await analyzeContractFile(file);
+  } catch {
+    toast("Nao consegui ler esse PDF automaticamente. Baixe o arquivo e envie pela tela IA Gemini.");
+  }
+}
+
+async function generateRenewalLetterFromSelection(contractId = state.aiContractId) {
+  const contract = (db.contratos || []).find((item) => item.id === contractId);
+  if (!contract) {
+    toast("Selecione um contrato para gerar a carta.");
+    return;
+  }
+  if (!cloudEnabled() || !cloud()?.generateRenewalLetter) {
+    toast("Firebase AI Logic ainda nao esta configurado.");
+    return;
+  }
+  state.aiContractId = contract.id;
+  state.aiBusy = "letter";
+  state.aiLetter = "";
+  renderAi();
+  try {
+    const renewal = findRenewalForContract(contract);
+    state.aiLetter = await cloud().generateRenewalLetter(contract, renewal);
+    saveDb("Gerou carta de renovacao", contract.name || contract.id);
+    toast("Carta de renovacao gerada.");
+  } catch (error) {
+    toast(aiErrorMessage(error));
+  } finally {
+    state.aiBusy = "";
+    renderAi();
+  }
+}
+
+async function generateRenewalLetterForContractId(id) {
+  state.aiContractId = id;
+  setView("ia");
+  await generateRenewalLetterFromSelection(id);
+}
+
+async function generateRenewalLetterForRenewalId(id) {
+  const renewal = (db.renovacoes || []).find((item) => item.id === id);
+  const contract = (db.contratos || []).find((item) => sameText(item.name, renewal?.contract) || sameText(item.client, renewal?.client));
+  if (!contract) {
+    setView("ia");
+    toast("Nao encontrei o contrato vinculado a esta renovacao.");
+    return;
+  }
+  state.aiContractId = contract.id;
+  setView("ia");
+  await generateRenewalLetterFromSelection(contract.id);
+}
+
+function findRenewalForContract(contract) {
+  return (db.renovacoes || []).find((item) => sameText(item.contract, contract.name) || sameText(item.client, contract.client)) || {};
+}
+
+function sameText(a, b) {
+  return removeAccents(cleanImport(a)).toLowerCase() === removeAccents(cleanImport(b)).toLowerCase();
+}
+
+async function copyAiLetter() {
+  if (!state.aiLetter) return;
+  try {
+    await navigator.clipboard.writeText(state.aiLetter);
+    toast("Carta copiada.");
+  } catch {
+    toast("Nao foi possivel copiar automaticamente.");
+  }
+}
+
+function aiErrorMessage(error) {
+  const message = String(error?.message || error || "");
+  if (/AI Logic|Firebase AI|not configured|api key|permission|403|404|app check/i.test(message)) {
+    return "Ative Firebase AI Logic e App Check no Console Firebase para usar o Gemini.";
+  }
+  if (/413|size|large|18 MB|20 MB/i.test(message)) return "PDF grande demais para leitura direta. Use um arquivo menor.";
+  return "A IA nao conseguiu concluir esta acao agora.";
 }
 
 function metric(label, value, hint) {

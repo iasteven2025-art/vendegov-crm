@@ -632,6 +632,113 @@ h3 {
   line-height: 1.38;
 }
 
+.ai-metric-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.ai-layout {
+  align-items: start;
+}
+
+.ai-workbench {
+  display: grid;
+  gap: 14px;
+}
+
+.ai-notice {
+  display: grid;
+  gap: 4px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  font-size: 13px;
+}
+
+.ai-notice.success {
+  border-color: #bfe4d2;
+  background: #f3fbf7;
+  color: #225f45;
+}
+
+.ai-notice.warn {
+  border-color: #efd8a9;
+  background: #fff9eb;
+  color: #77581d;
+}
+
+.ai-upload {
+  display: grid;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.ai-upload input,
+.ai-upload select {
+  min-height: 42px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper);
+  padding: 9px 11px;
+  color: var(--text);
+}
+
+.ai-contract-preview,
+.ai-result {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfcfd;
+  padding: 12px;
+}
+
+.ai-contract-preview strong,
+.ai-contract-preview small {
+  display: block;
+}
+
+.ai-contract-preview small {
+  margin-top: 4px;
+  color: var(--muted);
+}
+
+.ai-result {
+  display: grid;
+  gap: 12px;
+}
+
+.ai-result-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.ai-json-preview,
+.generated-text {
+  overflow: auto;
+  max-height: 360px;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  background: var(--paper);
+  padding: 12px;
+  white-space: pre-wrap;
+  color: #26323c;
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.generated-text {
+  min-height: 260px;
+}
+
+.ai-flow {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
 .table-panel {
   overflow: hidden;
 }
@@ -1070,7 +1177,8 @@ h3 {
 
   .metric-grid,
   .kanban,
-  .module-grid {
+  .module-grid,
+  .ai-flow {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -1143,6 +1251,7 @@ h3 {
   .metric-grid,
   .kanban,
   .module-grid,
+  .ai-flow,
   .record-form,
   .detail-grid {
     grid-template-columns: 1fr;

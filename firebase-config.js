@@ -3,6 +3,11 @@ window.VENDEGOV_FIREBASE_CONFIG = {
   tenantId: "computeck-demo",
   allowSignup: false,
   fallbackLocal: false,
+  ai: {
+    enabled: true,
+    provider: "firebase-ai-logic",
+    model: "gemini-3.6-flash",
+  },
   firebase: {
     apiKey: "AIzaSyDB0S1B8npz-rQ4_4gqx9brbcDyTFmDEpM",
     authDomain: "vendegov-crm-computeck.firebaseapp.com",
