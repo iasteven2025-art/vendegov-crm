@@ -743,6 +743,49 @@ h3 {
   overflow: hidden;
 }
 
+.renewal-rules {
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbfb 100%);
+}
+
+.automation-steps {
+  display: grid;
+  gap: 10px;
+}
+
+.automation-step {
+  display: grid;
+  grid-template-columns: 48px 1fr;
+  gap: 11px;
+  align-items: center;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 10px;
+}
+
+.automation-step span {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 40px;
+  border-radius: 8px;
+  background: var(--navy);
+  color: #ffffff;
+  font-size: 15px;
+  font-weight: 850;
+}
+
+.automation-step strong,
+.automation-step small {
+  display: block;
+}
+
+.automation-step small {
+  margin-top: 3px;
+  color: var(--muted);
+  line-height: 1.35;
+}
+
 .link-button {
   display: inline-flex;
   align-items: center;
