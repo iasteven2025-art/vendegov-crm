@@ -12,6 +12,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Deploy Firestore rules
+        shell: bash
+        run: |
+          cat > "$RUNNER_TEMP/firebase-service-account.json" <<'JSON'
+          ${{ secrets.FIREBASE_SERVICE_ACCOUNT_VENDEGOV_CRM }}
+          JSON
+          npx firebase-tools@latest deploy --only firestore:rules --project vendegov-crm-computeck --non-interactive
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/firebase-service-account.json
+
       - uses: FirebaseExtended/action-hosting-deploy@v0
         with:
           repoToken: ${{ secrets.GITHUB_TOKEN }}
