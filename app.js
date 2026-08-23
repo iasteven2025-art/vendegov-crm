@@ -28,15 +28,19 @@ const schemas = {
     columns: ["Empresa", "Segmento", "Potencial", "Status", "Responsavel", "Acoes"],
     fields: [
       field("name", "Empresa", "text", true),
-      field("segment", "Segmento", "select", true, ["Construcao", "Saude", "Tecnologia", "Transporte", "Alimentos", "Servicos"]),
+      field("segment", "Segmento/tipo", "select", true, ["Construcao", "Saude", "Tecnologia", "Transporte", "Alimentos", "Servicos", "Prefeitura", "Camara", "Consorcio", "Instituto", "Autarquia", "Fundacao", "Outro"]),
       field("cnpj", "CNPJ", "text"),
       field("contact", "Contato principal", "text"),
       field("email", "E-mail", "email"),
       field("phone", "Telefone", "text"),
       field("city", "Cidade/UF", "text"),
+      field("website", "Site/dominio", "url"),
+      field("region", "Regiao", "text"),
+      field("originalName", "Nome origem", "text"),
+      field("sourceId", "ID origem", "text"),
       field("potential", "Potencial", "number"),
       field("status", "Status", "select", true, statusOptions),
-      field("owner", "Responsavel", "select", true, ["Mariana Costa", "Rafael Lima", "Steven Passos", "Equipe comercial"]),
+      field("owner", "Responsavel", "select", true, ["Steven Passos", "Diego Pereira", "Digital Compasso", "Mariana Costa", "Rafael Lima", "Equipe comercial"]),
       field("notes", "Observacoes", "textarea"),
     ],
     row: (r) => [mainCell(r.name, r.contact || r.cnpj), r.segment, money(r.potential), badge(r.status), r.owner],
@@ -232,9 +236,14 @@ const schemas = {
     fields: [
       field("name", "Nome", "text", true),
       field("email", "E-mail", "email", true),
-      field("role", "Perfil", "select", true, ["Administrador", "Gestor", "Comercial", "Documentos", "Financeiro"]),
+      field("role", "Perfil", "select", true, ["Administrador", "Gestor", "Comercial", "Consultor", "Consultor Comercial", "Consultor de Negocios", "Documentos", "Financeiro"]),
+      field("phone", "Telefone", "text"),
+      field("photoUrl", "Foto", "url"),
+      field("contactEmail", "E-mail de contato", "email"),
+      field("sourceId", "ID origem", "text"),
       field("status", "Status", "select", true, [["green", "Ativo"], ["yellow", "Pendente"], ["red", "Bloqueado"]]),
       field("lastAccess", "Ultimo acesso", "date"),
+      field("notes", "Observacoes", "textarea"),
     ],
     row: (r) => [mainCell(r.name, r.email), r.role, badge(r.status), r.email, date(r.lastAccess)],
   },
@@ -758,6 +767,7 @@ function renderCrud(moduleKey) {
             <option value="yellow">Atencao</option>
             <option value="red">Risco</option>
           </select>
+          ${moduleKey === "clientes" ? `<button class="secondary-button" data-import-clients type="button">Importar clientes CSV</button>` : ""}
           ${moduleKey === "contratos" ? `<button class="secondary-button" data-import-contracts type="button">Importar contratos CSV</button>` : ""}
           <button class="primary-button" data-add="${moduleKey}" type="button">Novo ${schema.singular}</button>
         </div>
@@ -858,7 +868,7 @@ function renderSettings() {
     <section class="table-panel">
       <div class="table-toolbar">
         <div><h2>Parametrizacao</h2><p>Empresas, regioes, documentos, sistema, usuarios, grupos, templates e auditoria.</p></div>
-        <div class="toolbar-controls">${tabButtons}${active !== "audit" ? `<button class="primary-button" data-add="${active}" type="button">Novo</button>` : ""}</div>
+        <div class="toolbar-controls">${tabButtons}${active === "usuarios" ? `<button class="secondary-button" data-import-users type="button">Importar consultores CSV</button>` : ""}${active !== "audit" ? `<button class="primary-button" data-add="${active}" type="button">Novo</button>` : ""}</div>
       </div>
       ${body}
     </section>
@@ -889,8 +899,18 @@ function bindDynamicActions() {
   document.querySelectorAll("[data-edit]").forEach((button) => button.addEventListener("click", () => openForm(button.dataset.module, button.dataset.edit)));
   document.querySelectorAll("[data-delete]").forEach((button) => button.addEventListener("click", () => askDelete(button.dataset.module, button.dataset.delete)));
   document.querySelectorAll("[data-ai]").forEach((button) => button.addEventListener("click", () => simulateAi(button.dataset.ai)));
+  document.querySelectorAll("[data-import-clients]").forEach((button) => button.addEventListener("click", () => {
+    el.importFile.dataset.mode = "clientes";
+    el.importFile.accept = ".csv,text/csv,application/vnd.ms-excel";
+    el.importFile.click();
+  }));
   document.querySelectorAll("[data-import-contracts]").forEach((button) => button.addEventListener("click", () => {
     el.importFile.dataset.mode = "contratos";
+    el.importFile.accept = ".csv,text/csv,application/vnd.ms-excel";
+    el.importFile.click();
+  }));
+  document.querySelectorAll("[data-import-users]").forEach((button) => button.addEventListener("click", () => {
+    el.importFile.dataset.mode = "usuarios";
     el.importFile.accept = ".csv,text/csv,application/vnd.ms-excel";
     el.importFile.click();
   }));
@@ -1087,7 +1107,13 @@ function formatFieldValue(fieldDef, value) {
   if (fieldDef.type === "date") return date(value);
   if (fieldDef.name === "status") return badge(value);
   if (fieldDef.type === "url") {
-    const label = fieldDef.name === "fileUrl" ? "Abrir PDF no VendeGov" : fieldDef.name === "documentUrl" ? "Abrir PDF origem" : value;
+    const label = fieldDef.name === "fileUrl"
+      ? "Abrir PDF no VendeGov"
+      : fieldDef.name === "documentUrl"
+        ? "Abrir PDF origem"
+        : fieldDef.name === "photoUrl"
+          ? "Abrir foto"
+          : value;
     return `<a href="${escapeAttr(value)}" target="_blank" rel="noreferrer">${escapeHtml(label)}</a>`;
   }
   return escapeHtml(value);
@@ -1125,8 +1151,8 @@ function importDb(event) {
   reader.onload = () => {
     try {
       const content = String(reader.result || "");
-      if (isCsvFile(file) || el.importFile.dataset.mode === "contratos") {
-        importContractsCsv(content, file.name);
+      if (isCsvFile(file) || el.importFile.dataset.mode) {
+        importBase44Csv(content, file.name, el.importFile.dataset.mode);
         return;
       }
       const incoming = JSON.parse(content);
@@ -1151,8 +1177,22 @@ function isCsvFile(file) {
   return name.endsWith(".csv") || type.includes("csv") || type.includes("excel");
 }
 
+function importBase44Csv(text, fileName, mode = "") {
+  const rows = csvToObjects(text);
+  if (!rows.length) throw new Error("CSV vazio");
+  const headers = Object.keys(rows[0]);
+  if (mode === "contratos" || headers.includes("numero_contrato")) return importContractsRows(rows, fileName);
+  if (mode === "clientes" || (headers.includes("nome_exibicao") && headers.includes("municipio"))) return importClientsRows(rows, fileName);
+  if (mode === "usuarios" || headers.includes("consultor_email")) return importConsultantsRows(rows, fileName);
+  throw new Error("CSV Base44 nao reconhecido");
+}
+
 function importContractsCsv(text, fileName) {
   const rows = csvToObjects(text);
+  return importContractsRows(rows, fileName);
+}
+
+function importContractsRows(rows, fileName) {
   if (!rows.length) throw new Error("CSV vazio");
   let created = 0;
   let updated = 0;
@@ -1237,6 +1277,171 @@ function contractImportNotes(row) {
     cleanImport(row.pct_comissao_implantacao) ? `Comissao implantacao: ${cleanImport(row.pct_comissao_implantacao)}%` : "",
     cleanImport(row.pct_comissao_licenciamento) ? `Comissao licenciamento: ${cleanImport(row.pct_comissao_licenciamento)}%` : "",
     contractItemsSummary(row.itens_contrato),
+  ];
+  return parts.filter(Boolean).join("\n");
+}
+
+function importClientsRows(rows, fileName) {
+  let created = 0;
+  let updated = 0;
+  let skipped = 0;
+  const clients = [...(db.clientes || [])];
+  rows.forEach((row) => {
+    const mapped = clientFromCsvRow(row);
+    if (!mapped) {
+      skipped += 1;
+      return;
+    }
+    const existingIndex = clients.findIndex((item) => (
+      mapped.sourceId
+        ? item.sourceId === mapped.sourceId || item.id === mapped.sourceId
+        : item.name === mapped.name && item.city === mapped.city
+    ));
+    if (existingIndex >= 0) {
+      clients[existingIndex] = {
+        ...clients[existingIndex],
+        ...mapped,
+        id: clients[existingIndex].id,
+        createdAt: clients[existingIndex].createdAt || mapped.createdAt,
+        updatedAt: now(),
+      };
+      updated += 1;
+    } else {
+      clients.unshift(mapped);
+      created += 1;
+    }
+  });
+  db.clientes = clients;
+  saveDb("Importou clientes", `${created} novos, ${updated} atualizados, ${skipped} ignorados - ${fileName}`);
+  setView("clientes");
+  toast(`${created} clientes importados, ${updated} atualizados.`);
+}
+
+function clientFromCsvRow(row) {
+  const sourceId = cleanImport(row.id);
+  const name = cleanImport(row.nome_exibicao) || cleanImport(row.orgao_original) || cleanImport(row.municipio);
+  if (!sourceId && !name) return null;
+  const contact = contactFromBase44(row.contatos);
+  return {
+    id: sourceId || uid(),
+    sourceId,
+    createdAt: normalizeImportDate(row.created_date) || now(),
+    updatedAt: normalizeImportDate(row.updated_date) || now(),
+    name: name || "Cliente nao informado",
+    segment: mapOrganizationType(row.tipo_orgao),
+    cnpj: "",
+    contact: contact.name,
+    email: contact.email,
+    phone: contact.phone,
+    city: cleanImport(row.municipio),
+    website: cleanImport(row.dominio),
+    region: cleanImport(row.regiao),
+    originalName: cleanImport(row.orgao_original),
+    potential: 0,
+    status: "green",
+    owner: "Equipe comercial",
+    notes: clientImportNotes(row, contact),
+  };
+}
+
+function clientImportNotes(row, contact) {
+  const parts = [
+    cleanImport(row.observacoes),
+    cleanImport(row.orgao_original) ? `Orgao original: ${cleanImport(row.orgao_original)}` : "",
+    cleanImport(row.tipo_orgao) ? `Tipo de orgao: ${cleanImport(row.tipo_orgao)}` : "",
+    cleanImport(row.grupo_empresa_id) ? `Grupo empresa origem: ${cleanImport(row.grupo_empresa_id)}` : "",
+    contact.summary,
+  ];
+  return parts.filter(Boolean).join("\n");
+}
+
+function contactFromBase44(value) {
+  const fallback = { name: "", phone: "", email: "", summary: "" };
+  const text = cleanImport(value);
+  if (!text || text === "[]") return fallback;
+  try {
+    const contacts = JSON.parse(text);
+    if (!Array.isArray(contacts)) return fallback;
+    const parsed = contacts.map((item) => ({
+      name: cleanImport(item.nome),
+      type: cleanImport(item.tipo),
+      value: cleanImport(item.valor),
+    })).filter((item) => item.name || item.value);
+    const first = parsed[0] || fallback;
+    const email = parsed.find((item) => item.value.includes("@"))?.value || "";
+    const phone = parsed.find((item) => !item.value.includes("@"))?.value || "";
+    const summary = parsed.length ? `Contatos origem: ${parsed.map((item) => [item.name, item.type, item.value].filter(Boolean).join(" - ")).join("; ")}` : "";
+    return { name: first.name, phone, email, summary };
+  } catch {
+    return { ...fallback, summary: `Contatos origem: ${text}` };
+  }
+}
+
+function importConsultantsRows(rows, fileName) {
+  let created = 0;
+  let updated = 0;
+  let skipped = 0;
+  const users = [...(db.usuarios || [])];
+  rows.forEach((row) => {
+    const mapped = consultantFromCsvRow(row);
+    if (!mapped) {
+      skipped += 1;
+      return;
+    }
+    const existingIndex = users.findIndex((item) => (
+      mapped.sourceId
+        ? item.sourceId === mapped.sourceId || item.id === mapped.sourceId
+        : item.email === mapped.email
+    ));
+    if (existingIndex >= 0) {
+      users[existingIndex] = {
+        ...users[existingIndex],
+        ...mapped,
+        id: users[existingIndex].id,
+        createdAt: users[existingIndex].createdAt || mapped.createdAt,
+        updatedAt: now(),
+      };
+      updated += 1;
+    } else {
+      users.unshift(mapped);
+      created += 1;
+    }
+  });
+  db.usuarios = users;
+  saveDb("Importou consultores", `${created} novos, ${updated} atualizados, ${skipped} ignorados - ${fileName}`);
+  state.configTab = "usuarios";
+  setView("configuracoes");
+  toast(`${created} consultores importados, ${updated} atualizados.`);
+}
+
+function consultantFromCsvRow(row) {
+  const sourceId = cleanImport(row.id);
+  const email = cleanImport(row.consultor_email) || cleanImport(row.email_contato);
+  const name = cleanImport(row.nome) || email;
+  if (!sourceId && !email && !name) return null;
+  return {
+    id: sourceId || uid(),
+    sourceId,
+    createdAt: normalizeImportDate(row.created_date) || now(),
+    updatedAt: normalizeImportDate(row.updated_date) || now(),
+    name: name || "Consultor nao informado",
+    email: email || cleanImport(row.email_contato),
+    contactEmail: cleanImport(row.email_contato),
+    role: mapConsultantRole(row.cargo),
+    phone: cleanImport(row.telefone),
+    photoUrl: cleanImport(row.foto_url),
+    status: "green",
+    lastAccess: normalizeImportDate(row.updated_date) || today(),
+    notes: consultantImportNotes(row),
+  };
+}
+
+function consultantImportNotes(row) {
+  const parts = [
+    cleanImport(row.cargo) ? `Cargo origem: ${cleanImport(row.cargo)}` : "",
+    cleanImport(row.empresa_id) ? `Empresa origem: ${cleanImport(row.empresa_id)}` : "",
+    cleanImport(row.grupo_empresa_id) ? `Grupo empresa origem: ${cleanImport(row.grupo_empresa_id)}` : "",
+    cleanImport(row.created_by_id) ? `Criado por origem: ${cleanImport(row.created_by_id)}` : "",
   ];
   return parts.filter(Boolean).join("\n");
 }
@@ -1340,6 +1545,27 @@ function mapConsultant(value) {
   if (raw.includes("mariana")) return "Mariana Costa";
   if (raw.includes("rafael")) return "Rafael Lima";
   return "Equipe comercial";
+}
+
+function mapConsultantRole(value) {
+  const raw = removeAccents(cleanImport(value)).toLowerCase();
+  if (raw.includes("administr")) return "Administrador";
+  if (raw.includes("gestor")) return "Gestor";
+  if (raw.includes("comercial")) return "Consultor Comercial";
+  if (raw.includes("negocio")) return "Consultor de Negocios";
+  if (raw.includes("financeiro")) return "Financeiro";
+  return "Consultor";
+}
+
+function mapOrganizationType(value) {
+  const raw = removeAccents(cleanImport(value)).toLowerCase();
+  if (raw.includes("prefeitura")) return "Prefeitura";
+  if (raw.includes("camara")) return "Camara";
+  if (raw.includes("consorcio")) return "Consorcio";
+  if (raw.includes("instituto")) return "Instituto";
+  if (raw.includes("autarquia")) return "Autarquia";
+  if (raw.includes("fundacao")) return "Fundacao";
+  return cleanImport(value) || "Outro";
 }
 
 function importBool(value) {
