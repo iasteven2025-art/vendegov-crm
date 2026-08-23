@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>VendeGov CRM - Sistema</title>
+    <meta name="description" content="Sistema VendeGov CRM para empresas que vendem ao governo." />
+    <link rel="icon" href="./assets/vendegov-crm-simbolo.svg" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <section class="login-screen" id="loginScreen">
+      <div class="login-panel">
+        <img class="login-logo" src="./assets/vendegov-crm-logo-horizontal.svg" alt="VendeGov CRM" />
+        <h1>Operacao comercial B2G em um unico lugar</h1>
+        <p>
+          Controle agenda, clientes, licitacoes, propostas, marketing, contratos, documentos,
+          renovacoes, comissoes, relatorios e parametrizacao.
+        </p>
+        <form id="loginForm" class="login-form">
+          <label>
+            E-mail
+            <input name="email" type="email" value="admin@vendegov.com.br" required />
+          </label>
+          <label>
+            Senha
+            <input name="password" type="password" value="demo123" required />
+          </label>
+          <button type="submit" class="primary-button">Entrar no sistema</button>
+        </form>
+        <small>Ambiente preparado para Firebase. Sem configuracao, funciona em modo local.</small>
+      </div>
+      <div class="login-aside">
+        <div class="aside-card">
+          <span>Receita mensal</span>
+          <strong id="loginRevenue">R$ 286.400</strong>
+          <small>base demonstrativa ativa</small>
+        </div>
+        <div class="aside-card">
+          <span>Contratos monitorados</span>
+          <strong id="loginContracts">157</strong>
+          <small>com alertas e renovacoes</small>
+        </div>
+      </div>
+    </section>
+
+    <div class="app-shell hidden" id="appShell">
+      <aside class="sidebar">
+        <div class="brand">
+          <img src="./assets/vendegov-crm-simbolo.svg" alt="" />
+          <div>
+            <strong>VendeGov</strong>
+            <span>CRM B2G</span>
+          </div>
+        </div>
+        <nav class="nav-list" id="mainNav" aria-label="Menu principal"></nav>
+        <div class="sidebar-summary">
+          <span>Ambiente</span>
+          <strong>Sistema Firebase</strong>
+          <small id="cloudStatus">Aguardando configuracao do Firebase.</small>
+        </div>
+      </aside>
+
+      <main class="main">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow" id="pageKicker">VendeGov CRM</p>
+            <h1 id="pageTitle">Painel</h1>
+          </div>
+          <div class="top-actions">
+            <label class="search-box">
+              <span>Buscar</span>
+              <input id="globalSearch" type="search" placeholder="cliente, edital, contrato..." />
+            </label>
+            <button class="secondary-button" id="importButton" type="button">Importar</button>
+            <button class="secondary-button" id="exportButton" type="button">Exportar</button>
+            <button class="primary-button" id="newButton" type="button">Novo</button>
+            <button class="user-button" id="logoutButton" type="button" title="Sair">
+              <span>SP</span>
+              <strong>Steven</strong>
+            </button>
+          </div>
+        </header>
+
+        <section class="content" id="content" aria-live="polite"></section>
+      </main>
+    </div>
+
+    <div class="modal-backdrop hidden" id="recordModal">
+      <section class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+        <header class="modal-header">
+          <div>
+            <p class="eyebrow" id="modalKicker">Cadastro</p>
+            <h2 id="modalTitle">Novo registro</h2>
+          </div>
+          <button class="icon-button quiet" id="closeModal" type="button" aria-label="Fechar">x</button>
+        </header>
+        <form id="recordForm" class="record-form"></form>
+      </section>
+    </div>
+
+    <div class="drawer-backdrop hidden" id="drawerBackdrop"></div>
+    <aside class="detail-drawer hidden" id="detailDrawer" aria-label="Detalhes do registro">
+      <header class="drawer-header">
+        <div>
+          <p class="eyebrow" id="drawerKicker">Registro</p>
+          <h2 id="drawerTitle">Detalhes</h2>
+        </div>
+        <button class="icon-button quiet" id="closeDrawer" type="button" aria-label="Fechar">x</button>
+      </header>
+      <div class="drawer-body" id="drawerBody"></div>
+    </aside>
+
+    <div class="modal-backdrop hidden" id="confirmModal">
+      <section class="modal small" role="dialog" aria-modal="true" aria-labelledby="confirmTitle">
+        <header class="modal-header">
+          <div>
+            <p class="eyebrow">Confirmacao</p>
+            <h2 id="confirmTitle">Remover registro?</h2>
+          </div>
+        </header>
+        <div class="confirm-body">
+          <p id="confirmText">Esta acao remove o registro da base local.</p>
+          <div class="confirm-actions">
+            <button class="secondary-button" id="cancelDelete" type="button">Cancelar</button>
+            <button class="danger-button" id="confirmDelete" type="button">Remover</button>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <input id="importFile" type="file" accept="application/json" hidden />
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script src="./firebase-config.js"></script>
+    <script src="./firebase-adapter.js"></script>
+    <script src="./app.js"></script>
+  </body>
+</html>
