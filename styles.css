@@ -994,6 +994,71 @@ h3 {
   grid-column: 1 / -1;
 }
 
+.contract-ai-scan {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  align-items: center;
+  border: 1px solid #bde8dc;
+  border-radius: 8px;
+  padding: 14px;
+  background: linear-gradient(135deg, #f0fbf7 0%, #f7fbff 100%);
+}
+
+.contract-ai-copy {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  min-width: 0;
+}
+
+.contract-ai-copy > span {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  background: var(--navy);
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.contract-ai-copy strong {
+  display: block;
+  color: var(--navy);
+  font-size: 15px;
+}
+
+.contract-ai-copy p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.contract-ai-button {
+  min-width: 220px;
+}
+
+.contract-ai-status {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.contract-ai-status strong {
+  color: var(--green-2);
+}
+
+.contract-ai-status.is-error strong {
+  color: var(--red);
+}
+
 .form-actions {
   display: flex;
   justify-content: flex-end;
@@ -1271,5 +1336,14 @@ h3 {
 
   .bar-row b {
     grid-column: 2;
+  }
+
+  .contract-ai-scan {
+    grid-template-columns: 1fr;
+  }
+
+  .contract-ai-button {
+    width: 100%;
+    min-width: 0;
   }
 }

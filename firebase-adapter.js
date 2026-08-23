@@ -193,6 +193,8 @@ Responda somente JSON valido, sem markdown, neste formato:
   "numero_contrato": "",
   "contratante": "",
   "orgao_comprador": "",
+  "tipo_orgao": "",
+  "regiao": "",
   "contratada": "",
   "cnpj_contratada": "",
   "objeto": "",
