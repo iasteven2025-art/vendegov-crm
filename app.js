@@ -348,6 +348,8 @@ const state = {
   configTab: "usuarios",
   editing: null,
   deleteTarget: null,
+  clientDetailId: "",
+  clientTab: "contratos",
   aiBusy: "",
   aiFocus: "",
   aiContractId: "",
@@ -662,6 +664,7 @@ function renderNav() {
 
 function setView(view) {
   state.view = view;
+  if (view !== "cliente") state.clientDetailId = "";
   state.status = "todos";
   state.query = "";
   el.search.value = "";
@@ -673,8 +676,9 @@ function render() {
   const meta = viewMeta(state.view);
   el.title.textContent = meta.title;
   el.kicker.textContent = meta.kicker;
-  el.newButton.disabled = state.view === "dashboard" || state.view === "relatorios" || state.view === "ia";
+  el.newButton.disabled = ["dashboard", "relatorios", "ia", "cliente"].includes(state.view);
   if (state.view === "dashboard") return renderDashboard();
+  if (state.view === "cliente") return renderClientDetail();
   if (state.view === "ia") return renderAi();
   if (state.view === "relatorios") return renderReports();
   if (state.view === "configuracoes") return renderSettings();
@@ -683,6 +687,7 @@ function render() {
 
 function viewMeta(view) {
   if (view === "dashboard") return { title: "Painel executivo", kicker: "Visao geral" };
+  if (view === "cliente") return { title: "Ficha do cliente", kicker: "Carteira" };
   if (view === "ia") return { title: "IA Gemini", kicker: "Automacao operacional" };
   if (view === "relatorios") return { title: "Relatorios", kicker: "Vendas, gestao e comissoes" };
   if (view === "configuracoes") return { title: "Parametrizacao", kicker: "Administracao" };
@@ -799,6 +804,330 @@ function renderCrud(moduleKey) {
     renderCrud(moduleKey);
   });
   bindDynamicActions();
+}
+
+function openClientDetail(id) {
+  closeDrawer();
+  state.clientDetailId = id;
+  state.clientTab = state.clientTab || "contratos";
+  state.view = "cliente";
+  state.status = "todos";
+  state.query = "";
+  el.search.value = "";
+  document.querySelectorAll(".nav-item").forEach((item) => item.classList.toggle("active", item.dataset.view === "clientes"));
+  render();
+}
+
+function renderClientDetail() {
+  const client = (db.clientes || []).find((item) => item.id === state.clientDetailId);
+  if (!client) {
+    state.clientDetailId = "";
+    setView("clientes");
+    return;
+  }
+  const rel = clientRelations(client);
+  const revenue = sum(rel.contracts, "monthly");
+  const active = rel.contracts.some((item) => ["green", "cyan"].includes(item.status)) ? "green" : client.status || "cyan";
+  const tabs = [
+    ["contratos", "Contratos", rel.contracts.length],
+    ["produtos", "Produtos", rel.products.length],
+    ["cartas", "Cartas", rel.renewals.length],
+    ["propostas", "Propostas", rel.proposals.length],
+    ["licitacoes", "Licitacoes", rel.bids.length],
+    ["ia", "Diagnostico IA", ""],
+  ];
+  if (!tabs.some(([key]) => key === state.clientTab)) state.clientTab = "contratos";
+  el.title.textContent = client.name || "Cliente";
+  el.kicker.textContent = "Ficha do cliente";
+  el.content.innerHTML = `
+    <section class="client-page">
+      <button class="link-button" data-client-back type="button">Voltar para Clientes</button>
+      <header class="client-hero">
+        <div class="client-icon">CL</div>
+        <div>
+          <h2>${escapeHtml(client.name || "Cliente sem nome")}</h2>
+          <p>${escapeHtml([client.segment, client.city, client.region].filter(Boolean).join(" - ") || "Carteira comercial")}</p>
+        </div>
+        <div class="client-hero-actions">
+          ${badge(active)}
+          <button class="secondary-button" data-client-edit="${escapeAttr(client.id)}" type="button">Editar</button>
+        </div>
+      </header>
+      <div class="client-metrics">
+        ${clientMetric("Receita mensal", money(revenue), "contratos ativos")}
+        ${clientMetric("Contratos", rel.contracts.length, "vinculados")}
+        ${clientMetric("Cartas de renovacao", rel.renewals.length, "tratativas")}
+        ${clientMetric("Licitacoes", rel.bids.length, "oportunidades")}
+      </div>
+      <section class="client-quick">
+        <span>Acoes rapidas</span>
+        <div>
+          <button class="secondary-button" data-client-new-contract="${escapeAttr(client.id)}" type="button">Novo contrato</button>
+          <button class="secondary-button success" data-client-new-proposal="${escapeAttr(client.id)}" type="button">Nova proposta</button>
+          <button class="secondary-button violet" data-client-letter="${escapeAttr(client.id)}" type="button">Carta de renovacao</button>
+          <button class="secondary-button warning" data-client-new-bid="${escapeAttr(client.id)}" type="button">Nova licitacao</button>
+          <button class="secondary-button danger-soft" data-client-docs="${escapeAttr(client.id)}" type="button">CNDs</button>
+          <button class="secondary-button" data-client-certificate="${escapeAttr(client.id)}" type="button">Atestados</button>
+        </div>
+      </section>
+      <nav class="client-tabs" aria-label="Dados do cliente">
+        ${tabs.map(([key, label, count]) => `<button class="${state.clientTab === key ? "active" : ""}" data-client-tab="${key}" type="button">${label}${count !== "" ? `<span>${count}</span>` : ""}</button>`).join("")}
+      </nav>
+      <section class="client-content">
+        ${renderClientTab(client, rel)}
+      </section>
+    </section>
+  `;
+  bindDynamicActions();
+}
+
+function renderClientTab(client, rel) {
+  if (state.clientTab === "produtos") return renderClientProducts(rel.products);
+  if (state.clientTab === "cartas") return renderClientRenewals(client, rel);
+  if (state.clientTab === "propostas") return renderClientRows("propostas", rel.proposals);
+  if (state.clientTab === "licitacoes") return renderClientRows("licitacoes", rel.bids);
+  if (state.clientTab === "ia") return renderClientAiDiagnosis(client, rel);
+  return renderClientContracts(client, rel.contracts);
+}
+
+function renderClientContracts(client, contracts) {
+  if (!contracts.length) {
+    return `<div class="empty-state">Nenhum contrato vinculado a este cliente.</div>`;
+  }
+  return `
+    <div class="client-section-actions">
+      <button class="primary-button" data-client-new-contract="${escapeAttr(client.id)}" type="button">Novo contrato</button>
+    </div>
+    <div class="client-contract-list">
+      ${contracts.map((contract) => clientContractCard(contract)).join("")}
+    </div>`;
+}
+
+function clientContractCard(contract) {
+  const history = [
+    `${escapeHtml(contract.name || "Contrato")} ${date(contract.start)} - ${date(contract.end)} ${money(contract.monthly)}/mes`,
+    contract.renewal ? `Renovacao prevista em ${date(contract.renewal)}` : "",
+  ].filter(Boolean);
+  return `
+    <article class="client-contract-card">
+      <div class="client-contract-main">
+        <div>
+          <h3>${escapeHtml(contract.name || "Contrato")}</h3>
+          <p>${escapeHtml(contract.object || contract.agency || "Objeto nao informado")}</p>
+          <small>Inicio: ${date(contract.start)} &nbsp; Vencimento: ${date(contract.end)} &nbsp; Responsavel: ${escapeHtml(contract.owner || "Equipe")}</small>
+        </div>
+        <div class="client-contract-value">
+          <strong>${money(contract.monthly)}<span>/mes</span></strong>
+          <small>${money(contract.value)} total</small>
+        </div>
+      </div>
+      <div class="client-contract-actions">
+        ${badge(contract.status)}
+        <button class="mini-button" data-open="${escapeAttr(contract.id)}" data-module="contratos" type="button">Visualizar</button>
+        <button class="mini-button" data-edit="${escapeAttr(contract.id)}" data-module="contratos" type="button">Editar</button>
+        <button class="mini-button" data-ai-letter-contract="${escapeAttr(contract.id)}" type="button">Carta</button>
+        <button class="mini-button" data-client-add-renewal="${escapeAttr(contract.id)}" type="button">Aditivo</button>
+      </div>
+      <div class="client-history">
+        <strong>Historico</strong>
+        ${history.map((item) => `<span>${item}</span>`).join("")}
+      </div>
+    </article>`;
+}
+
+function renderClientProducts(products) {
+  if (!products.length) return `<div class="empty-state">Nenhum produto identificado nos contratos.</div>`;
+  return `<div class="client-card-grid">${products.map((item) => `
+    <article class="client-mini-card">
+      <strong>${escapeHtml(item.name)}</strong>
+      <span>${item.count} contrato(s)</span>
+      <small>${money(item.revenue)}/mes</small>
+    </article>`).join("")}</div>`;
+}
+
+function renderClientRenewals(client, rel) {
+  const renewalRows = rel.renewals.map((item) => [mainCell(item.name, item.contract), item.stage || "-", money(item.value), date(item.renewalDate), badge(item.status), rowButton("renovacoes", item.id)]);
+  const rows = renewalRows.length ? simpleTable(["Carta/tratativa", "Etapa", "Valor", "Data", "Status", "Acoes"], renewalRows) : `<div class="empty-state">Nenhuma carta ou renovacao registrada.</div>`;
+  return `<div class="client-section-actions"><button class="primary-button" data-client-letter="${escapeAttr(client.id)}" type="button">Gerar carta de renovacao</button></div>${rows}`;
+}
+
+function renderClientRows(moduleKey, rows) {
+  if (!rows.length) return `<div class="empty-state">Nenhum registro vinculado a este cliente.</div>`;
+  return simpleTable(schemas[moduleKey].columns, rows.map((item) => [...schemas[moduleKey].row(item), rowButton(moduleKey, item.id)]));
+}
+
+function renderClientAiDiagnosis(client, rel) {
+  const revenue = sum(rel.contracts, "monthly");
+  const nextEnd = [...rel.contracts].filter((item) => item.end).sort((a, b) => String(a.end).localeCompare(String(b.end)))[0];
+  return `
+    <div class="client-ai-panel">
+      ${insight("01", `${rel.contracts.length} contratos vinculados com ${money(revenue)} de receita mensal.`)}
+      ${insight("02", nextEnd ? `Proximo vencimento: ${nextEnd.name} em ${date(nextEnd.end)}.` : "Nenhum vencimento de contrato informado.")}
+      ${insight("03", `${rel.bids.length} licitacoes e ${rel.proposals.length} propostas vinculadas ao cliente.`)}
+      <button class="primary-button" data-ai="Diagnostico do cliente ${escapeAttr(client.name || "")}" type="button">Abrir IA Gemini</button>
+    </div>`;
+}
+
+function clientMetric(label, value, hint) {
+  return `<article><span>${label}</span><strong>${value}</strong><small>${hint}</small></article>`;
+}
+
+function clientRelations(client) {
+  const contracts = (db.contratos || []).filter((item) => contractBelongsToClient(item, client));
+  const renewals = (db.renovacoes || []).filter((item) => renewalBelongsToClient(item, client, contracts));
+  const proposals = (db.propostas || []).filter((item) => itemBelongsToClient(item, client));
+  const bids = (db.licitacoes || []).filter((item) => itemBelongsToClient(item, client) || sameText(item.agency, client.name));
+  return {
+    contracts,
+    renewals,
+    proposals,
+    bids,
+    products: productsFromContracts(contracts),
+  };
+}
+
+function contractBelongsToClient(contract, client) {
+  return contract.clientId === client.id || itemBelongsToClient(contract, client) || sameText(contract.agency, client.name) || sameText(contract.agency, client.originalName);
+}
+
+function renewalBelongsToClient(renewal, client, contracts) {
+  return itemBelongsToClient(renewal, client) || contracts.some((contract) => sameText(renewal.contract, contract.name));
+}
+
+function itemBelongsToClient(item, client) {
+  return item.clientId === client.id || sameText(item.client, client.name) || sameText(item.client, client.originalName);
+}
+
+function productsFromContracts(contracts) {
+  const grouped = new Map();
+  contracts.forEach((contract) => {
+    const name = cleanImport(contract.object).slice(0, 90) || "Objeto nao informado";
+    const key = normalizeText(name);
+    const current = grouped.get(key) || { name, count: 0, revenue: 0 };
+    current.count += 1;
+    current.revenue += Number(contract.monthly || 0);
+    grouped.set(key, current);
+  });
+  return [...grouped.values()];
+}
+
+function openClientLinkedForm(moduleKey, clientId) {
+  const client = (db.clientes || []).find((item) => item.id === clientId);
+  if (!client) return;
+  const defaults = linkedDefaults(moduleKey, client);
+  openForm(moduleKey, null, defaults);
+}
+
+function linkedDefaults(moduleKey, client) {
+  const base = {
+    client: client.name,
+    clientId: client.id,
+    owner: client.owner || currentUserLabel(),
+    status: "green",
+  };
+  if (moduleKey === "contratos") {
+    return { ...base, agency: client.name, agencyType: client.segment, region: client.region, monthly: 0, value: 0 };
+  }
+  if (moduleKey === "licitacoes") {
+    return { ...base, agency: client.name, modality: "Pregao eletronico", stage: "Oportunidade", value: 0 };
+  }
+  if (moduleKey === "propostas") {
+    return { ...base, name: `Proposta ${client.name}`, value: 0, margin: 0, status: "yellow" };
+  }
+  if (moduleKey === "documentos") {
+    return { ...base, name: "CND / Atestado", type: "CND", status: "yellow" };
+  }
+  return base;
+}
+
+function openContractRenewalForm(contractId) {
+  const contract = (db.contratos || []).find((item) => item.id === contractId);
+  if (!contract) return;
+  openForm("renovacoes", null, {
+    name: `Renovacao ${contract.name || ""}`.trim(),
+    client: contract.client,
+    clientId: contract.clientId,
+    contract: contract.name,
+    value: contract.monthly,
+    renewalDate: contract.renewal || contract.end,
+    stage: "Carta",
+    status: "yellow",
+  });
+}
+
+async function generateClientRenewalLetter(clientId) {
+  const client = (db.clientes || []).find((item) => item.id === clientId);
+  if (!client) return;
+  const contract = clientRelations(client).contracts[0];
+  if (!contract) {
+    toast("Cadastre um contrato para gerar a carta.");
+    return;
+  }
+  await generateRenewalLetterForContractId(contract.id);
+}
+
+function ensureClientForContract(contract) {
+  const clientName = cleanImport(contract.client) || cleanImport(contract.agency);
+  if (!clientName) return null;
+  db.clientes = db.clientes || [];
+  let client = findClientForContract(contract, clientName);
+  const potential = Number(contract.value || 0) || Number(contract.monthly || 0) * 12;
+  if (client) {
+    contract.clientId = client.id;
+    contract.client = client.name;
+    client.segment = client.segment || contract.agencyType || "Outro";
+    client.region = client.region || contract.region || "";
+    client.potential = Math.max(Number(client.potential || 0), potential || 0);
+    client.owner = client.owner || contract.owner || currentUserLabel();
+    client.status = client.status || contract.status || "green";
+    client.updatedAt = now();
+    return client;
+  }
+  client = record({
+    name: clientName,
+    segment: contract.agencyType || "Outro",
+    cnpj: "",
+    contact: "",
+    email: "",
+    phone: "",
+    city: "",
+    website: "",
+    region: contract.region || "",
+    originalName: contract.agency && contract.agency !== clientName ? contract.agency : "",
+    sourceId: "",
+    potential,
+    status: contract.status || "green",
+    owner: contract.owner || currentUserLabel() || "Equipe comercial",
+    notes: `Criado automaticamente a partir do contrato ${contract.name || ""}.`.trim(),
+  });
+  db.clientes.unshift(client);
+  contract.clientId = client.id;
+  contract.client = client.name;
+  return client;
+}
+
+function findClientForContract(contract, clientName) {
+  return (db.clientes || []).find((client) => (
+    (contract.clientId && client.id === contract.clientId) ||
+    sameText(client.name, clientName) ||
+    sameText(client.originalName, clientName) ||
+    sameText(client.name, contract.agency) ||
+    sameText(client.originalName, contract.agency)
+  ));
+}
+
+function linkRecordToExistingClient(values) {
+  const clientName = cleanImport(values.client) || cleanImport(values.agency);
+  if (!clientName) return null;
+  const client = (db.clientes || []).find((item) => sameText(item.name, clientName) || sameText(item.originalName, clientName));
+  if (!client) return null;
+  values.clientId = client.id;
+  if (values.client !== undefined) values.client = client.name;
+  return client;
+}
+
+function normalizeText(value) {
+  return removeAccents(cleanImport(value)).toLowerCase().replace(/\s+/g, " ").trim();
 }
 
 function crudTable(moduleKey, rows) {
@@ -1020,9 +1349,24 @@ function simpleTable(headers, rows) {
 function bindDynamicActions() {
   document.querySelectorAll("[data-jump]").forEach((button) => button.addEventListener("click", () => setView(button.dataset.jump)));
   document.querySelectorAll("[data-add]").forEach((button) => button.addEventListener("click", () => openForm(button.dataset.add)));
-  document.querySelectorAll("[data-open]").forEach((button) => button.addEventListener("click", () => openDetail(button.dataset.module, button.dataset.open)));
+  document.querySelectorAll("[data-open]").forEach((button) => button.addEventListener("click", () => {
+    if (button.dataset.module === "clientes") return openClientDetail(button.dataset.open);
+    openDetail(button.dataset.module, button.dataset.open);
+  }));
   document.querySelectorAll("[data-edit]").forEach((button) => button.addEventListener("click", () => openForm(button.dataset.module, button.dataset.edit)));
   document.querySelectorAll("[data-delete]").forEach((button) => button.addEventListener("click", () => askDelete(button.dataset.module, button.dataset.delete)));
+  document.querySelectorAll("[data-client-back]").forEach((button) => button.addEventListener("click", () => setView("clientes")));
+  document.querySelectorAll("[data-client-tab]").forEach((button) => button.addEventListener("click", () => {
+    state.clientTab = button.dataset.clientTab;
+    renderClientDetail();
+  }));
+  document.querySelectorAll("[data-client-edit]").forEach((button) => button.addEventListener("click", () => openForm("clientes", button.dataset.clientEdit)));
+  document.querySelectorAll("[data-client-new-contract]").forEach((button) => button.addEventListener("click", () => openClientLinkedForm("contratos", button.dataset.clientNewContract)));
+  document.querySelectorAll("[data-client-new-proposal]").forEach((button) => button.addEventListener("click", () => openClientLinkedForm("propostas", button.dataset.clientNewProposal)));
+  document.querySelectorAll("[data-client-new-bid]").forEach((button) => button.addEventListener("click", () => openClientLinkedForm("licitacoes", button.dataset.clientNewBid)));
+  document.querySelectorAll("[data-client-letter]").forEach((button) => button.addEventListener("click", () => generateClientRenewalLetter(button.dataset.clientLetter)));
+  document.querySelectorAll("[data-client-add-renewal]").forEach((button) => button.addEventListener("click", () => openContractRenewalForm(button.dataset.clientAddRenewal)));
+  document.querySelectorAll("[data-client-docs], [data-client-certificate]").forEach((button) => button.addEventListener("click", () => openClientLinkedForm("documentos", button.dataset.clientDocs || button.dataset.clientCertificate)));
   document.querySelectorAll("[data-ai]").forEach((button) => button.addEventListener("click", () => openAiWorkspace(button.dataset.ai)));
   document.querySelectorAll("[data-ai-analyze-pdf]").forEach((button) => button.addEventListener("click", analyzePdfFromPanel));
   document.querySelectorAll("[data-ai-save-contract]").forEach((button) => button.addEventListener("click", saveAiDraftContract));
@@ -1060,11 +1404,12 @@ function bindDynamicActions() {
   }));
 }
 
-function openForm(moduleKey, id = null) {
+function openForm(moduleKey, id = null, defaults = {}) {
   const schema = schemas[moduleKey];
   if (!schema) return;
   closeDrawer();
   const item = id ? (db[moduleKey] || []).find((row) => row.id === id) : null;
+  const values = item || defaults;
   state.editing = { moduleKey, id };
   state.contractFormAiBusy = false;
   state.contractFormAiFile = null;
@@ -1072,7 +1417,7 @@ function openForm(moduleKey, id = null) {
   el.modalKicker.textContent = schema.title;
   el.modalTitle.textContent = id ? `Editar ${schema.singular}` : `Novo ${schema.singular}`;
   el.form.innerHTML = `${contractAiScanner(moduleKey)}
-    ${schema.fields.map((f) => inputFor(f, item ? item[f.name] : "")).join("")}
+    ${schema.fields.map((f) => inputFor(f, values ? values[f.name] : "")).join("")}
     <div class="form-actions">
       <button class="secondary-button" type="button" id="cancelForm">Cancelar</button>
       <button class="primary-button" type="submit">Salvar</button>
@@ -1239,9 +1584,11 @@ async function submitForm(event) {
     values[f.name] = formData.get(f.name) || "";
     if (f.type === "number") values[f.name] = Number(values[f.name] || 0);
   });
+  if (moduleKey !== "contratos") linkRecordToExistingClient(values);
   if (!pendingFile && moduleKey === "contratos" && state.contractFormAiFile) {
     pendingFile = state.contractFormAiFile;
   }
+  const linkedClient = moduleKey === "contratos" ? ensureClientForContract(values) : null;
   const recordId = id || uid();
   if (pendingFile) {
     values.fileRef = pendingFile.name;
@@ -1260,12 +1607,12 @@ async function submitForm(event) {
   if (id) {
     const idx = db[moduleKey].findIndex((item) => item.id === id);
     db[moduleKey][idx] = { ...db[moduleKey][idx], ...values, updatedAt: now() };
-    saveDb(`Editou ${schemas[moduleKey].singular}`, values.name || id);
+    saveDb(`Editou ${schemas[moduleKey].singular}`, linkedClient ? `${values.name || id} vinculado a ${linkedClient.name}` : values.name || id);
     toast("Registro atualizado.");
   } else {
     values.id = recordId;
     db[moduleKey].unshift(record(values));
-    saveDb(`Criou ${schemas[moduleKey].singular}`, values.name || "novo registro");
+    saveDb(`Criou ${schemas[moduleKey].singular}`, linkedClient ? `${values.name || "novo registro"} vinculado a ${linkedClient.name}` : values.name || "novo registro");
     toast("Registro criado.");
   }
   closeForm();
@@ -1465,6 +1812,7 @@ function importContractsRows(rows, fileName) {
       skipped += 1;
       return;
     }
+    ensureClientForContract(mapped);
     const existingIndex = contracts.findIndex((item) => (
       mapped.sourceId
         ? item.sourceId === mapped.sourceId || item.id === mapped.sourceId
@@ -1921,6 +2269,7 @@ function saveAiDraftContract() {
     toast("Nao ha contrato extraido para cadastrar.");
     return;
   }
+  ensureClientForContract(state.aiDraftContract);
   const item = record(state.aiDraftContract);
   db.contratos.unshift(item);
   state.aiContractId = item.id;
@@ -2001,7 +2350,9 @@ function findRenewalForContract(contract) {
 }
 
 function sameText(a, b) {
-  return removeAccents(cleanImport(a)).toLowerCase() === removeAccents(cleanImport(b)).toLowerCase();
+  const left = normalizeText(a);
+  const right = normalizeText(b);
+  return Boolean(left && right && left === right);
 }
 
 async function copyAiLetter() {
