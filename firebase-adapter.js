@@ -134,6 +134,32 @@
     return { name: file.name, path, url };
   }
 
+  async function queueEmail(message) {
+    if (!configured || !auth || !auth.currentUser || !message?.to) return null;
+    const ctx = await init();
+    const libs = await loadLibs();
+    const ref = libs.firestoreLib.collection(ctx.firestore, "tenants", tenantId(), "outbox");
+    const payload = {
+      type: message.type || "email",
+      renewalId: message.renewalId || "",
+      contractId: message.contractId || "",
+      client: message.client || "",
+      contract: message.contract || "",
+      to: message.to,
+      cc: message.cc ? [message.cc] : [],
+      message: {
+        subject: message.subject || "VendeGov CRM",
+        text: message.body || "",
+      },
+      status: "pending",
+      createdAt: libs.firestoreLib.serverTimestamp(),
+      updatedAt: libs.firestoreLib.serverTimestamp(),
+      createdBy: auth.currentUser.email || auth.currentUser.uid,
+    };
+    const docRef = await libs.firestoreLib.addDoc(ref, payload);
+    return docRef.id;
+  }
+
   function aiSettings() {
     return settings.ai || {};
   }
@@ -248,6 +274,7 @@ ${JSON.stringify(renewal || {}, null, 2)}
     loadDb,
     saveDb,
     uploadFile,
+    queueEmail,
     aiEnabled,
     aiModelName,
     analyzeContractFile,
