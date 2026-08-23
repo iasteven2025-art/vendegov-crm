@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="172" viewBox="0 0 760 172" role="img" aria-label="VendeGov CRM logo">
+  
+  <g transform="translate(42 28)">
+    <rect x="0" y="0" width="116" height="116" rx="26" fill="#0B1F33"/>
+    <path d="M28 72 C28 39 53 19 83 23 C101 25 112 38 114 55" fill="none" stroke="#19A7A8" stroke-opacity="0.56" stroke-width="7" stroke-linecap="round"/>
+    <path d="M26 73 L51 98 L106 29" fill="none" stroke="#1FAF72" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="106" cy="29" r="7" fill="#19A7A8" stroke="#0B1F33" stroke-width="4"/>
+  </g>
+  <text x="198" y="90" font-family="Segoe UI, Inter, Arial, sans-serif" font-size="58" font-weight="700" letter-spacing="0">
+    <tspan fill="#0B1F33">Vende</tspan><tspan fill="#1FAF72">Gov</tspan>
+  </text>
+  <rect x="522" y="57" width="84" height="32" rx="16" fill="#EAF7F2" fill-opacity="1" stroke="#1FAF72" stroke-width="2"/>
+  <text x="544" y="79" font-family="Segoe UI, Inter, Arial, sans-serif" font-size="18" font-weight="700" fill="#0B1F33">CRM</text>
+  
+</svg>
