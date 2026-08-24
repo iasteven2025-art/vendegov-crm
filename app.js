@@ -9,9 +9,8 @@ const modules = [
   ["documentos", "07", "Entrega docs", "Carteira"],
   ["renovacoes", "08", "Renovacoes", "Carteira"],
   ["comissoes", "09", "Comissoes", "Financeiro"],
-  ["ia", "10", "IA Gemini", "Automacao"],
-  ["relatorios", "11", "Relatorios", "Relatorios"],
-  ["configuracoes", "12", "Parametros", "Parametrizacao"],
+  ["relatorios", "10", "Relatorios", "Relatorios"],
+  ["configuracoes", "11", "Parametros", "Parametrizacao"],
 ];
 
 const statusOptions = [
@@ -262,6 +261,7 @@ const schemas = {
       field("email", "E-mail", "email", true),
       field("role", "Perfil", "select", true, ["Administrador", "Gestor", "Comercial", "Consultor", "Consultor Comercial", "Consultor de Negocios", "Documentos", "Financeiro"]),
       field("phone", "Telefone", "text"),
+      field("photoUpload", "Upload da foto", "file", false, null, { accept: "image/*", refField: "photoRef", urlField: "photoUrl" }),
       field("photoUrl", "Foto", "url"),
       field("contactEmail", "E-mail de contato", "email"),
       field("sourceId", "ID origem", "text"),
@@ -269,7 +269,7 @@ const schemas = {
       field("lastAccess", "Ultimo acesso", "date"),
       field("notes", "Observacoes", "textarea"),
     ],
-    row: (r) => [mainCell(r.name, r.email), r.role, badge(r.status), r.email, date(r.lastAccess)],
+    row: (r) => [mediaCell(r.name, r.email, r.photoUrl), r.role, badge(r.status), r.email, date(r.lastAccess)],
   },
   templates: {
     title: "Templates de e-mail",
@@ -299,13 +299,14 @@ const schemas = {
       field("phone", "Telefone do timbre", "text"),
       field("address", "Endereco do timbre", "text"),
       field("city", "Cidade/UF", "text"),
+      field("logoUpload", "Upload da logo do timbre", "file", false, null, { accept: "image/*", refField: "logoRef", urlField: "logoUrl" }),
       field("logoUrl", "Logo do timbre", "url"),
       field("portfolio", "Carteira", "text"),
       field("manager", "Gestor", "text"),
       field("status", "Status", "select", true, [["green", "Ativa"], ["yellow", "Implantacao"], ["red", "Inativa"]]),
       field("notes", "Observacoes", "textarea"),
     ],
-    row: (r) => [mainCell(r.name, r.portfolio), r.region, badge(r.status), r.manager, r.portfolio],
+    row: (r) => [mediaCell(r.name, r.portfolio, r.logoUrl), r.region, badge(r.status), r.manager, r.portfolio],
   },
   regioes: {
     title: "Regioes",
@@ -437,8 +438,21 @@ const el = {
   cloudStatus: document.querySelector("#cloudStatus"),
 };
 
-function field(name, label, type, required = false, options = null) {
-  return { name, label, type, required, options };
+function field(name, label, type, required = false, options = null, extra = {}) {
+  return { name, label, type, required, options, ...extra };
+}
+
+function defaultAiConfig() {
+  return {
+    enabled: true,
+    provider: "firebase-ai-logic",
+    model: "gemini-3.6-flash",
+    endpointUrl: "",
+    secretRef: "Firebase AI Logic",
+    status: "green",
+    updatedAt: today(),
+    notes: "Use Firebase AI Logic para manter a chave fora do navegador. Outros provedores devem usar um endpoint seguro.",
+  };
 }
 
 function seedDb() {
@@ -529,9 +543,10 @@ function seedDb() {
     sistema: [
       record({ name: "Alerta de vencimento", area: "Carteira", value: "30 dias", status: "green", updatedAt: "2026-08-18", notes: "Usado no painel de proximas acoes." }),
       record({ name: "Indice padrao de reajuste", area: "Financeiro", value: "IPCA", status: "green", updatedAt: "2026-08-14", notes: "Pode ser alterado por contrato." }),
-      record({ name: "Modelo de IA para editais", area: "IA", value: "Assistente documental", status: "cyan", updatedAt: "2026-08-12", notes: "Assistente preparado para analise documental." }),
+      record({ name: "Modelo de IA", area: "IA", value: "Assistente documental", status: "cyan", updatedAt: "2026-08-12", notes: "Assistente preparado para leitura de contratos e cartas." }),
       record({ name: "Integracao portal de compras", area: "Integracoes", value: "Planejada", status: "yellow", updatedAt: "2026-08-10", notes: "Etapa futura para SaaS." }),
     ],
+    aiConfig: defaultAiConfig(),
     gruposUsuarios: [
       record({ name: "Administradores", permissions: "Acesso total, configuracoes, usuarios, auditoria e exportacao.", users: 1, status: "green", owner: "Steven Passos", notes: "Perfil restrito." }),
       record({ name: "Comercial", permissions: "Clientes, agenda, licitacoes, propostas, marketing e relatorios de vendas.", users: 3, status: "green", owner: "Mariana Costa", notes: "Equipe de relacionamento." }),
@@ -547,6 +562,7 @@ function emptyDb() {
   Object.keys(schemas).forEach((key) => {
     clean[key] = [];
   });
+  clean.aiConfig = defaultAiConfig();
   clean.audit = [];
   clean.notificacoes = [];
   return clean;
@@ -596,6 +612,53 @@ function currentUserLabel() {
   return user?.email || "Usuario Firebase";
 }
 
+function currentUserRecord() {
+  const email = String(cloud()?.currentUser?.()?.email || "").toLowerCase();
+  if (!email) return null;
+  return (db.usuarios || []).find((item) => String(item.email || item.contactEmail || "").toLowerCase() === email) || null;
+}
+
+function updateUserProfileButton() {
+  if (!el.logoutButton) return;
+  const profile = currentUserRecord();
+  const email = cloud()?.currentUser?.()?.email || "";
+  const name = profile?.name || email.split("@")[0] || "Usuario";
+  const avatar = profile?.photoUrl
+    ? `<img src="${escapeAttr(profile.photoUrl)}" alt="">`
+    : `<span>${escapeHtml(initials(name))}</span>`;
+  el.logoutButton.innerHTML = `${avatar}<strong>${escapeHtml(firstName(name))}</strong>`;
+}
+
+function firstName(name) {
+  return cleanImport(name).split(/\s+/)[0] || "Usuario";
+}
+
+function initials(name) {
+  const parts = cleanImport(name).split(/\s+/).filter(Boolean);
+  const letters = parts.length > 1 ? [parts[0], parts[parts.length - 1]] : [parts[0] || "VG"];
+  return letters.map((part) => part[0] || "").join("").slice(0, 2).toUpperCase();
+}
+
+function getAiConfig() {
+  return { ...defaultAiConfig(), ...(db.aiConfig || {}) };
+}
+
+function aiProviderLabel(provider = getAiConfig().provider) {
+  return {
+    "firebase-ai-logic": "Firebase AI Logic",
+    openai: "OpenAI",
+    anthropic: "Anthropic Claude",
+    "azure-openai": "Azure OpenAI",
+    "google-gemini": "Google Gemini API",
+    mistral: "Mistral",
+    "custom-endpoint": "Endpoint personalizado",
+  }[provider] || provider || "IA personalizada";
+}
+
+function syncCloudAiConfig() {
+  if (cloud()?.setAiConfig) cloud().setAiConfig(getAiConfig());
+}
+
 async function enterSystem(email, password) {
   if (!cloudEnabled()) {
     setCloudStatus("Firebase obrigatorio. Verifique a configuracao do projeto.");
@@ -610,6 +673,8 @@ async function enterSystem(email, password) {
     const remoteDb = await cloud().loadDb(emptyDb());
     shouldReplaceDemoDb = isDemoDb(remoteDb);
     db = shouldReplaceDemoDb ? emptyDb() : { ...emptyDb(), ...remoteDb };
+    syncCloudAiConfig();
+    updateUserProfileButton();
     setCloudStatus(`Firebase conectado: ${loggedUser.email || "usuario autenticado"}.`);
     toast("Firebase conectado. Dados carregados.");
   } catch (error) {
@@ -753,12 +818,12 @@ function bindEvents() {
   });
   el.letterModal.addEventListener("click", handleLetterModalClick);
   el.form.addEventListener("submit", submitForm);
-  el.exportButton.addEventListener("click", exportDb);
-  el.importButton.addEventListener("click", () => {
-    el.importFile.dataset.mode = "";
-    el.importFile.accept = ".json,.csv,application/json,text/csv";
-    el.importFile.click();
-  });
+  if (el.exportButton) el.exportButton.addEventListener("click", exportDb);
+  if (el.importButton) {
+    el.importButton.addEventListener("click", () => {
+      startImport("", ".json,.csv,application/json,text/csv");
+    });
+  }
   el.importFile.addEventListener("change", importDb);
   el.cancelDelete.addEventListener("click", closeConfirm);
   el.confirmDelete.addEventListener("click", deleteConfirmed);
@@ -791,10 +856,9 @@ function render() {
   const meta = viewMeta(state.view);
   el.title.textContent = meta.title;
   el.kicker.textContent = meta.kicker;
-  el.newButton.disabled = ["dashboard", "relatorios", "ia", "cliente"].includes(state.view);
+  el.newButton.disabled = ["dashboard", "relatorios", "cliente"].includes(state.view);
   if (state.view === "dashboard") return renderDashboard();
   if (state.view === "cliente") return renderClientDetail();
-  if (state.view === "ia") return renderAi();
   if (state.view === "renovacoes") return renderRenewals();
   if (state.view === "relatorios") return renderReports();
   if (state.view === "configuracoes") return renderSettings();
@@ -804,7 +868,6 @@ function render() {
 function viewMeta(view) {
   if (view === "dashboard") return { title: "Visao Geral", kicker: "Contratos e renovacoes" };
   if (view === "cliente") return { title: "Ficha do cliente", kicker: "Carteira" };
-  if (view === "ia") return { title: "IA Gemini", kicker: "Automacao operacional" };
   if (view === "renovacoes") return { title: "Renovacoes de Contratos", kicker: "Acompanhamento" };
   if (view === "relatorios") return { title: "Relatorios", kicker: "Vendas, gestao e comissoes" };
   if (view === "configuracoes") return { title: "Parametrizacao", kicker: "Administracao" };
@@ -1385,8 +1448,6 @@ function renderCrud(moduleKey) {
             <option value="yellow">Atencao</option>
             <option value="red">Risco</option>
           </select>
-          ${moduleKey === "clientes" ? `<button class="secondary-button" data-import-clients type="button">Importar clientes CSV</button>` : ""}
-          ${moduleKey === "contratos" ? `<button class="secondary-button" data-import-contracts type="button">Importar contratos CSV</button>` : ""}
           <button class="primary-button" data-add="${moduleKey}" type="button">Novo ${schema.singular}</button>
         </div>
       </div>
@@ -1395,7 +1456,7 @@ function renderCrud(moduleKey) {
     <div class="module-grid">
       ${moduleCard("AI", "Acao inteligente", "Cria resumo e proxima acao para o registro selecionado.")}
       ${moduleCard("LOG", "Auditoria", "Todas as mudancas entram no historico do sistema.")}
-      ${moduleCard("EXP", "Exportacao", "Baixe uma copia JSON da base do Firebase para backup ou migracao.")}
+      ${moduleCard("IMP", "Importacao centralizada", "Backups e planilhas ficam em Parametros > Importacao.")}
     </div>
   `;
   const filter = document.querySelector("#statusFilter");
@@ -1434,7 +1495,6 @@ function renderRenewals() {
         </div>
         <div class="renewal-header-actions">
           <button class="secondary-button" data-run-renewal-automation type="button">Atualizar alertas</button>
-          <button class="primary-button" data-import-renewal-sheet type="button">Importar Planilha</button>
         </div>
       </div>
       <div class="renewal-kpi-grid">
@@ -1460,7 +1520,6 @@ function renewalTabBody(active, data) {
       <section class="table-panel renewal-table-panel">
         <div class="table-toolbar">
           <div><h2>Pendencias da Planilha</h2><p>Campos importados que precisam de complemento para a automacao funcionar sem bloqueio.</p></div>
-          <div class="toolbar-controls"><button class="secondary-button" data-import-renewal-sheet type="button">Importar Planilha</button></div>
         </div>
         ${data.sheetIssues.length ? simpleTable(["Pendencia", "Cliente", "Contrato", "Prazo", "Acoes"], data.sheetIssues.map(renewalIssueRow)) : `<div class="empty-state">Nenhuma pendencia critica encontrada na planilha.</div>`}
       </section>
@@ -1497,7 +1556,7 @@ function renewalTabBody(active, data) {
       <section class="table-panel renewal-table-panel">
         <div class="table-toolbar">
           <div><h2>Planilhas Importadas</h2><p>Base de renovacoes criada a partir dos contratos importados ou cadastrados.</p></div>
-          <div class="toolbar-controls"><button class="secondary-button" data-import-renewal-sheet type="button">Importar Planilha</button><button class="primary-button" data-add="renovacoes" type="button">Nova Renovacao</button></div>
+          <div class="toolbar-controls"><button class="primary-button" data-add="renovacoes" type="button">Nova Renovacao</button></div>
         </div>
         ${data.renewals.length ? simpleTable(["Registro", "Cliente", "Contrato", "Vigencia", "Status", "Acoes"], data.renewals.map(renewalSpreadsheetRow)) : `<div class="empty-state">Nenhuma planilha importada para renovacoes.</div>`}
       </section>
@@ -1892,7 +1951,7 @@ function renderClientAiDiagnosis(client, rel) {
       ${insight("01", `${rel.contracts.length} contratos vinculados com ${money(revenue)} de receita mensal.`)}
       ${insight("02", nextEnd ? `Proximo vencimento: ${nextEnd.name} em ${date(nextEnd.end)}.` : "Nenhum vencimento de contrato informado.")}
       ${insight("03", `${rel.bids.length} licitacoes e ${rel.proposals.length} propostas vinculadas ao cliente.`)}
-      <button class="primary-button" data-ai="Diagnostico do cliente ${escapeAttr(client.name || "")}" type="button">Abrir IA Gemini</button>
+      <button class="primary-button" data-ai="Diagnostico do cliente ${escapeAttr(client.name || "")}" type="button">Abrir IA</button>
     </div>`;
 }
 
@@ -2713,16 +2772,23 @@ function renderReports() {
 }
 
 function renderAi() {
+  el.content.innerHTML = aiWorkspaceHtml();
+  bindDynamicActions();
+}
+
+function aiWorkspaceHtml() {
+  syncCloudAiConfig();
+  const config = getAiConfig();
   const modelName = cloud()?.aiModelName ? cloud().aiModelName() : "gemini-3.6-flash";
   const aiOnline = cloudEnabled() && Boolean(cloud()?.aiEnabled?.());
   const contracts = db.contratos || [];
   const selectedId = state.aiContractId || contracts[0]?.id || "";
   const selectedContract = contracts.find((item) => item.id === selectedId) || contracts[0] || null;
   if (!state.aiContractId && selectedContract) state.aiContractId = selectedContract.id;
-  el.content.innerHTML = `
+  return `
     <div class="metric-grid ai-metric-grid">
-      ${metric("Status da IA", aiOnline ? "Preparada" : "Pendente", aiOnline ? "Firebase AI Logic no app" : "ative no Firebase Console")}
-      ${metric("Modelo", modelName, "Gemini via Firebase")}
+      ${metric("Status da IA", aiOnline ? "Preparada" : "Pendente", aiOnline ? aiProviderLabel(config.provider) : "configure em Parametros")}
+      ${metric("Modelo", modelName, aiProviderLabel(config.provider))}
       ${metric("Contratos", contracts.length, "base disponivel para renovacao")}
       ${metric("PDF direto", "ate 18 MB", "limite operacional seguro")}
     </div>
@@ -2775,25 +2841,25 @@ function renderAi() {
       <div class="table-toolbar">
         <div>
           <h2>Como a IA entra na rotina</h2>
-          <p>O VendeGov usa Gemini para transformar documentos e dados de contratos em registros e textos operacionais.</p>
+          <p>O VendeGov usa a IA configurada para transformar documentos e dados de contratos em registros e textos operacionais.</p>
         </div>
       </div>
       <div class="ai-flow">
         ${insight("01", "PDF entra na plataforma e a IA identifica campos contratuais.")}
         ${insight("02", "Voce confere o rascunho antes de salvar no Firebase.")}
         ${insight("03", "A carta de renovacao usa dados reais do contrato e da tratativa.")}
-        ${insight("04", "Nenhuma chave Gemini fica exposta no codigo do site.")}
+        ${insight("04", "Chaves privadas devem ficar no Firebase ou em um endpoint seguro, nunca no codigo do site.")}
       </div>
     </section>
   `;
-  bindDynamicActions();
 }
 
 function aiSetupNotice(aiOnline) {
+  const config = getAiConfig();
   if (aiOnline) {
-    return `<div class="ai-notice success"><strong>Conexao preparada</strong><span>O app esta pronto para usar Firebase AI Logic. Se a primeira chamada falhar, ative AI Logic e App Check no Console Firebase.</span></div>`;
+    return `<div class="ai-notice success"><strong>Conexao preparada</strong><span>Provedor ativo: ${escapeHtml(aiProviderLabel(config.provider))}. Modelo: ${escapeHtml(config.model || "padrao")}.</span></div>`;
   }
-  return `<div class="ai-notice warn"><strong>Configuracao pendente</strong><span>Ative AI Services > AI Logic no Firebase e escolha Gemini Developer API. Depois publique novamente.</span></div>`;
+  return `<div class="ai-notice warn"><strong>Configuracao pendente</strong><span>Configure a IA em Parametros > IA. Para provedores externos, use um endpoint seguro.</span></div>`;
 }
 
 function aiExtractionResult() {
@@ -2828,6 +2894,8 @@ function aiLetterResult() {
 function renderSettings() {
   const tabs = [
     ["empresas", "Empresas"],
+    ["importacao", "Importacao"],
+    ["ia", "IA"],
     ["regioes", "Regioes"],
     ["documentosImportantes", "Documentos"],
     ["sistema", "Sistema"],
@@ -2840,13 +2908,20 @@ function renderSettings() {
   const tabButtons = tabs
     .map(([key, label]) => `<button class="secondary-button config-tab${key === active ? " is-active" : ""}" data-config="${key}" type="button">${label}</button>`)
     .join("");
-  const body = active === "audit" ? auditTable() : crudTable(active, filtered(db[active] || []));
-  el.newButton.disabled = active === "audit";
+  const isCustomPanel = ["audit", "importacao", "ia"].includes(active);
+  const body = active === "audit"
+    ? auditTable()
+    : active === "importacao"
+      ? renderImportExportCenter()
+      : active === "ia"
+        ? renderAiSettingsPanel()
+        : crudTable(active, filtered(db[active] || []));
+  el.newButton.disabled = isCustomPanel;
   el.content.innerHTML = `
     <section class="table-panel">
       <div class="table-toolbar">
-        <div><h2>Parametrizacao</h2><p>Empresas, regioes, documentos, sistema, usuarios, grupos, templates e auditoria.</p></div>
-        <div class="toolbar-controls">${tabButtons}${active === "usuarios" ? `<button class="secondary-button" data-import-users type="button">Importar consultores CSV</button>` : ""}${active !== "audit" ? `<button class="primary-button" data-add="${active}" type="button">Novo</button>` : ""}</div>
+        <div><h2>Parametrizacao</h2><p>Empresas, importacao, IA, usuarios, grupos, templates e auditoria.</p></div>
+        <div class="toolbar-controls">${tabButtons}${!isCustomPanel ? `<button class="primary-button" data-add="${active}" type="button">Novo</button>` : ""}</div>
       </div>
       ${body}
     </section>
@@ -2856,6 +2931,105 @@ function renderSettings() {
     </div>
   `;
   bindDynamicActions();
+}
+
+function renderImportExportCenter() {
+  return `
+    <div class="import-center">
+      <article class="import-card">
+        <span>JSON</span>
+        <div>
+          <h3>Base completa</h3>
+          <p>Importe um backup JSON ou exporte uma copia atual da base no Firebase.</p>
+          <div class="drawer-actions">
+            <button class="primary-button" data-import-full type="button">Importar base</button>
+            <button class="secondary-button" data-export-db type="button">Exportar backup</button>
+          </div>
+        </div>
+      </article>
+      <article class="import-card">
+        <span>CSV</span>
+        <div>
+          <h3>Contratos</h3>
+          <p>Importa planilhas CSV de contratos e cria ou relaciona os clientes automaticamente.</p>
+          <button class="secondary-button" data-import-contracts type="button">Importar contratos CSV</button>
+        </div>
+      </article>
+      <article class="import-card">
+        <span>CLI</span>
+        <div>
+          <h3>Clientes</h3>
+          <p>Importa a base de clientes, orgaos, contatos, regioes e dados comerciais.</p>
+          <button class="secondary-button" data-import-clients type="button">Importar clientes CSV</button>
+        </div>
+      </article>
+      <article class="import-card">
+        <span>USR</span>
+        <div>
+          <h3>Consultores</h3>
+          <p>Importa usuarios/consultores exportados, incluindo nome, e-mail, telefone e foto por URL.</p>
+          <button class="secondary-button" data-import-users type="button">Importar consultores CSV</button>
+        </div>
+      </article>
+    </div>
+  `;
+}
+
+function renderAiSettingsPanel() {
+  const config = getAiConfig();
+  return `
+    <div class="ai-settings-panel">
+      <form class="ai-settings-form" id="aiConfigForm">
+        <label>Provedor de IA
+          <select name="provider">
+            ${aiProviderOptions().map(([value, label]) => `<option value="${value}" ${config.provider === value ? "selected" : ""}>${label}</option>`).join("")}
+          </select>
+        </label>
+        <label>Modelo
+          <input name="model" type="text" value="${escapeAttr(config.model || "")}" placeholder="ex: gemini-3.6-flash, gpt-5, claude..." />
+        </label>
+        <label class="wide">Endpoint seguro
+          <input name="endpointUrl" type="url" value="${escapeAttr(config.endpointUrl || "")}" placeholder="https://sua-funcao.cloudfunctions.net/ai" />
+        </label>
+        <label>Referencia da chave
+          <input name="secretRef" type="text" value="${escapeAttr(config.secretRef || "")}" placeholder="ex: Secret Manager / Cloud Function" />
+        </label>
+        <label>Status
+          <select name="status">
+            <option value="green" ${config.status === "green" ? "selected" : ""}>Ativa</option>
+            <option value="cyan" ${config.status === "cyan" ? "selected" : ""}>Em teste</option>
+            <option value="yellow" ${config.status === "yellow" ? "selected" : ""}>Configurar</option>
+            <option value="red" ${config.status === "red" ? "selected" : ""}>Inativa</option>
+          </select>
+        </label>
+        <label class="wide">Observacoes
+          <textarea name="notes">${escapeHtml(config.notes || "")}</textarea>
+        </label>
+        <div class="form-actions">
+          <button class="primary-button" type="submit">Salvar configuracao de IA</button>
+        </div>
+      </form>
+      <div class="ai-notice ${config.provider === "firebase-ai-logic" ? "success" : "warn"}">
+        <strong>${escapeHtml(aiProviderLabel(config.provider))}</strong>
+        <span>${config.provider === "firebase-ai-logic"
+          ? "Este provedor usa Firebase AI Logic e nao expoe chave de API no navegador."
+          : "Para este provedor, cadastre um endpoint seguro. Nao salve chaves privadas diretamente no app."}</span>
+      </div>
+      ${aiWorkspaceHtml()}
+    </div>
+  `;
+}
+
+function aiProviderOptions() {
+  return [
+    ["firebase-ai-logic", "Firebase AI Logic"],
+    ["openai", "OpenAI via endpoint seguro"],
+    ["anthropic", "Anthropic Claude via endpoint seguro"],
+    ["azure-openai", "Azure OpenAI via endpoint seguro"],
+    ["google-gemini", "Google Gemini API via endpoint seguro"],
+    ["mistral", "Mistral via endpoint seguro"],
+    ["custom-endpoint", "Endpoint personalizado"],
+  ];
 }
 
 function auditTable() {
@@ -2918,38 +3092,66 @@ function bindDynamicActions() {
     state.renewalTab = button.dataset.renewalTab;
     renderRenewals();
   }));
+  document.querySelectorAll("[data-export-db]").forEach((button) => button.addEventListener("click", exportDb));
+  document.querySelectorAll("[data-import-full]").forEach((button) => button.addEventListener("click", () => {
+    startImport("", ".json,.csv,application/json,text/csv");
+  }));
   document.querySelectorAll("[data-import-renewal-sheet]").forEach((button) => button.addEventListener("click", () => {
-    el.importFile.dataset.mode = "renovacoes";
-    el.importFile.accept = ".csv,text/csv,application/vnd.ms-excel";
-    el.importFile.click();
+    startImport("renovacoes", ".csv,text/csv,application/vnd.ms-excel");
   }));
   const contractSelect = document.querySelector("#aiContractSelect");
   if (contractSelect) {
     contractSelect.addEventListener("change", (event) => {
       state.aiContractId = event.target.value;
       state.aiLetter = "";
-      renderAi();
+      refreshAiSurface();
     });
   }
   document.querySelectorAll("[data-import-clients]").forEach((button) => button.addEventListener("click", () => {
-    el.importFile.dataset.mode = "clientes";
-    el.importFile.accept = ".csv,text/csv,application/vnd.ms-excel";
-    el.importFile.click();
+    startImport("clientes", ".csv,text/csv,application/vnd.ms-excel");
   }));
   document.querySelectorAll("[data-import-contracts]").forEach((button) => button.addEventListener("click", () => {
-    el.importFile.dataset.mode = "contratos";
-    el.importFile.accept = ".csv,text/csv,application/vnd.ms-excel";
-    el.importFile.click();
+    startImport("contratos", ".csv,text/csv,application/vnd.ms-excel");
   }));
   document.querySelectorAll("[data-import-users]").forEach((button) => button.addEventListener("click", () => {
-    el.importFile.dataset.mode = "usuarios";
-    el.importFile.accept = ".csv,text/csv,application/vnd.ms-excel";
-    el.importFile.click();
+    startImport("usuarios", ".csv,text/csv,application/vnd.ms-excel");
   }));
   document.querySelectorAll("[data-config]").forEach((button) => button.addEventListener("click", () => {
     state.configTab = button.dataset.config;
     renderSettings();
   }));
+  const aiConfigForm = document.querySelector("#aiConfigForm");
+  if (aiConfigForm) aiConfigForm.addEventListener("submit", saveAiConfigForm);
+}
+
+function startImport(mode, accept) {
+  el.importFile.dataset.mode = mode || "";
+  el.importFile.accept = accept || ".json,.csv,application/json,text/csv";
+  el.importFile.click();
+}
+
+function refreshAiSurface() {
+  if (state.view === "configuracoes" && state.configTab === "ia") return renderSettings();
+  return renderAi();
+}
+
+function saveAiConfigForm(event) {
+  event.preventDefault();
+  const form = new FormData(event.currentTarget);
+  db.aiConfig = {
+    ...getAiConfig(),
+    provider: String(form.get("provider") || "firebase-ai-logic"),
+    model: String(form.get("model") || "").trim() || "gemini-3.6-flash",
+    endpointUrl: String(form.get("endpointUrl") || "").trim(),
+    secretRef: String(form.get("secretRef") || "").trim(),
+    status: String(form.get("status") || "yellow"),
+    notes: String(form.get("notes") || "").trim(),
+    updatedAt: today(),
+  };
+  syncCloudAiConfig();
+  saveDb("Atualizou configuracao de IA", `${aiProviderLabel(db.aiConfig.provider)} - ${db.aiConfig.model}`);
+  renderSettings();
+  toast("Configuracao de IA salva.");
 }
 
 async function refreshRenewalAutomation() {
@@ -3367,7 +3569,7 @@ function openForm(moduleKey, id = null, defaults = {}) {
   el.modalKicker.textContent = schema.title;
   el.modalTitle.textContent = id ? `Editar ${schema.singular}` : `Novo ${schema.singular}`;
   el.form.innerHTML = `${contractAiScanner(moduleKey)}
-    ${schema.fields.map((f) => inputFor(f, values ? values[f.name] : "")).join("")}
+    ${schema.fields.map((f) => inputFor(f, values ? values[f.name] : "", values || {})).join("")}
     <div class="form-actions">
       <button class="secondary-button" type="button" id="cancelForm">Cancelar</button>
       <button class="primary-button" type="submit">Salvar</button>
@@ -3502,7 +3704,7 @@ function setContractAiFormStatus(title, text) {
   status.innerHTML = `<strong>${escapeHtml(title)}</strong><span>${escapeHtml(text)}</span>`;
 }
 
-function inputFor(f, value) {
+function inputFor(f, value, context = {}) {
   const required = f.required ? "required" : "";
   const wide = f.type === "textarea" ? " wide" : "";
   if (f.type === "select") {
@@ -3519,8 +3721,14 @@ function inputFor(f, value) {
     return `<label class="wide">${f.label}<textarea name="${f.name}" ${required}>${escapeHtml(value || "")}</textarea></label>`;
   }
   if (f.type === "file") {
-    const accept = f.label.toLowerCase().includes("pdf") ? ` accept="application/pdf,.pdf"` : "";
-    return `<label>${f.label}<input name="${f.name}" type="file"${accept} ${required} /></label>`;
+    const acceptValue = f.accept || (f.label.toLowerCase().includes("pdf") ? "application/pdf,.pdf" : "");
+    const accept = acceptValue ? ` accept="${escapeAttr(acceptValue)}"` : "";
+    const currentUrl = f.urlField ? context[f.urlField] : context.fileUrl;
+    const currentFile = f.refField ? context[f.refField] : context.fileRef;
+    const preview = currentUrl
+      ? `<small class="field-preview"><a href="${escapeAttr(currentUrl)}" target="_blank" rel="noreferrer">${escapeHtml(currentFile || "Arquivo atual")}</a></small>`
+      : "";
+    return `<label>${f.label}<input name="${f.name}" type="file"${accept} ${required} />${preview}</label>`;
   }
   return `<label>${f.label}<input name="${f.name}" type="${f.type}" value="${escapeAttr(value || "")}" ${required} /></label>`;
 }
@@ -3531,11 +3739,11 @@ async function submitForm(event) {
   if (!moduleKey) return;
   const formData = new FormData(el.form);
   const values = {};
-  let pendingFile = null;
+  const pendingUploads = [];
   schemas[moduleKey].fields.forEach((f) => {
     if (f.type === "file") {
       const file = formData.get(f.name);
-      if (file && file.name) pendingFile = file;
+      if (file && file.name) pendingUploads.push({ field: f, file });
       return;
     }
     values[f.name] = formData.get(f.name) || "";
@@ -3544,22 +3752,26 @@ async function submitForm(event) {
   if (moduleKey === "contratos") applyContractLegalDefaults(values);
   if (moduleKey !== "contratos") linkRecordToExistingClient(values);
   if (moduleKey === "renovacoes" && id) values.followUpAt = values.followUpAt || today();
-  if (!pendingFile && moduleKey === "contratos" && state.contractFormAiFile) {
-    pendingFile = state.contractFormAiFile;
+  if (!pendingUploads.length && moduleKey === "contratos" && state.contractFormAiFile) {
+    pendingUploads.push({ field: schemas.contratos.fields.find((fieldDef) => fieldDef.name === "attachment") || {}, file: state.contractFormAiFile });
   }
   const linkedClient = moduleKey === "contratos" ? ensureClientForContract(values) : null;
   const recordId = id || uid();
-  if (pendingFile) {
-    values.fileRef = pendingFile.name;
-    if (cloudEnabled()) {
-      try {
-        const uploaded = await cloud().uploadFile(moduleKey, recordId, pendingFile);
-        if (uploaded) {
-          values.fileRef = uploaded.name;
-          values.fileUrl = uploaded.url;
+  if (pendingUploads.length) {
+    for (const upload of pendingUploads) {
+      const refField = upload.field.refField || "fileRef";
+      const urlField = upload.field.urlField || "fileUrl";
+      values[refField] = upload.file.name;
+      if (cloudEnabled()) {
+        try {
+          const uploaded = await cloud().uploadFile(moduleKey, recordId, upload.file);
+          if (uploaded) {
+            values[refField] = uploaded.name;
+            values[urlField] = uploaded.url;
+          }
+        } catch {
+          toast("Registro salvo, mas um arquivo nao subiu para o Firebase.");
         }
-      } catch {
-        toast("Registro salvo, mas o anexo nao subiu para o Firebase.");
       }
     }
   }
@@ -3572,6 +3784,7 @@ async function submitForm(event) {
     }
     if (moduleKey === "renovacoes") await processRenewalAutomation({ generateLetters: true });
     saveDb(`Editou ${schemas[moduleKey].singular}`, linkedClient ? `${values.name || id} vinculado a ${linkedClient.name}` : values.name || id);
+    updateUserProfileButton();
     toast("Registro atualizado.");
   } else {
     values.id = recordId;
@@ -3583,6 +3796,7 @@ async function submitForm(event) {
     }
     if (moduleKey === "renovacoes") await processRenewalAutomation({ generateLetters: true });
     saveDb(`Criou ${schemas[moduleKey].singular}`, linkedClient ? `${values.name || "novo registro"} vinculado a ${linkedClient.name}` : values.name || "novo registro");
+    updateUserProfileButton();
     toast("Registro criado.");
   }
   closeForm();
@@ -3645,7 +3859,7 @@ function openDetail(moduleKey, id) {
         <button class="primary-button" data-edit="${id}" data-module="${moduleKey}" type="button">Editar registro</button>
         ${moduleKey === "contratos" ? `<button class="secondary-button" data-ai-letter-contract="${id}" type="button">Gerar carta IA</button>` : ""}
         ${moduleKey === "renovacoes" ? renewalDrawerActions(item) : ""}
-        <button class="secondary-button" data-ai="Diagnostico da carteira" type="button">Abrir IA Gemini</button>
+        <button class="secondary-button" data-ai="Diagnostico da carteira" type="button">Abrir IA</button>
         <button class="danger-button" data-delete="${id}" data-module="${moduleKey}" type="button">Excluir</button>
       </div>
     </section>
@@ -3699,7 +3913,9 @@ function formatFieldValue(fieldDef, value) {
         ? "Abrir PDF origem"
         : fieldDef.name === "photoUrl"
           ? "Abrir foto"
-          : value;
+          : fieldDef.name === "logoUrl"
+            ? "Abrir logo"
+            : value;
     return `<a href="${escapeAttr(value)}" target="_blank" rel="noreferrer">${escapeHtml(label)}</a>`;
   }
   return escapeHtml(value);
@@ -4186,7 +4402,8 @@ function removeAccents(value) {
 
 function openAiWorkspace(action = "") {
   state.aiFocus = action;
-  setView("ia");
+  state.configTab = "ia";
+  setView("configuracoes");
   if (action) toast(`IA pronta para: ${action}.`);
 }
 
@@ -4208,7 +4425,7 @@ async function analyzeContractFile(file) {
   state.aiBusy = "extract";
   state.aiDraftContract = null;
   state.aiLastExtraction = null;
-  renderAi();
+  refreshAiSurface();
   try {
     const extracted = await cloud().analyzeContractFile(file);
     state.aiLastExtraction = extracted;
@@ -4219,7 +4436,7 @@ async function analyzeContractFile(file) {
     toast(aiErrorMessage(error));
   } finally {
     state.aiBusy = "";
-    renderAi();
+    refreshAiSurface();
   }
 }
 
@@ -4291,7 +4508,7 @@ async function analyzeStoredContractPdf(id) {
     toast("Este contrato ainda nao tem PDF para a IA ler.");
     return;
   }
-  setView("ia");
+  openAiWorkspace();
   try {
     const response = await fetch(url);
     if (!response.ok) throw new Error("PDF indisponivel.");
@@ -4299,7 +4516,7 @@ async function analyzeStoredContractPdf(id) {
     const file = new File([blob], contract.fileRef || `${contract.name || "contrato"}.pdf`, { type: blob.type || "application/pdf" });
     await analyzeContractFile(file);
   } catch {
-    toast("Nao consegui ler esse PDF automaticamente. Baixe o arquivo e envie pela tela IA Gemini.");
+    toast("Nao consegui ler esse PDF automaticamente. Baixe o arquivo e envie pela tela de IA.");
   }
 }
 
@@ -4316,7 +4533,7 @@ async function generateRenewalLetterFromSelection(contractId = state.aiContractI
   state.aiContractId = contract.id;
   state.aiBusy = "letter";
   state.aiLetter = "";
-  renderAi();
+  refreshAiSurface();
   try {
     const renewal = findRenewalForContract(contract);
     state.aiLetter = await cloud().generateRenewalLetter(contract, renewal);
@@ -4337,13 +4554,13 @@ async function generateRenewalLetterFromSelection(contractId = state.aiContractI
     toast(aiErrorMessage(error));
   } finally {
     state.aiBusy = "";
-    renderAi();
+    refreshAiSurface();
   }
 }
 
 async function generateRenewalLetterForContractId(id) {
   state.aiContractId = id;
-  setView("ia");
+  openAiWorkspace();
   await generateRenewalLetterFromSelection(id);
 }
 
@@ -4351,7 +4568,7 @@ async function generateRenewalLetterForRenewalId(id) {
   const renewal = (db.renovacoes || []).find((item) => item.id === id);
   const contract = findContractForRenewal(renewal || {});
   if (!contract) {
-    setView("ia");
+    openAiWorkspace();
     toast("Nao encontrei o contrato vinculado a esta renovacao.");
     return;
   }
@@ -4359,7 +4576,7 @@ async function generateRenewalLetterForRenewalId(id) {
   saveDb("Gerou carta de renovacao", contract.name || contract.id);
   state.aiContractId = contract.id;
   state.aiLetter = renewal.letterDraft || "";
-  setView("ia");
+  openAiWorkspace();
   toast("Carta salva na renovacao.");
 }
 
@@ -4390,7 +4607,7 @@ async function copyAiLetter() {
 function aiErrorMessage(error) {
   const message = String(error?.message || error || "");
   if (/AI Logic|Firebase AI|not configured|api key|permission|403|404|app check/i.test(message)) {
-    return "Ative Firebase AI Logic e App Check no Console Firebase para usar o Gemini.";
+    return "Configure a IA em Parametros > IA e confira o provedor ativo.";
   }
   if (/413|size|large|18 MB|20 MB/i.test(message)) return "PDF grande demais para leitura direta. Use um arquivo menor.";
   return "A IA nao conseguiu concluir esta acao agora.";
@@ -4418,6 +4635,14 @@ function rowActions(moduleKey, id) {
 
 function rowButton(moduleKey, id) {
   return `<button class="mini-button" data-open="${id}" data-module="${moduleKey}" type="button">Abrir</button>`;
+}
+
+function mediaCell(title, subtitle, imageUrl) {
+  const cleanTitle = title || "-";
+  const media = imageUrl
+    ? `<img src="${escapeAttr(imageUrl)}" alt="">`
+    : `<span>${escapeHtml(initials(cleanTitle))}</span>`;
+  return `<div class="record-media">${media}<div>${mainCell(cleanTitle, subtitle)}</div></div>`;
 }
 
 function mainCell(title, subtitle) {
