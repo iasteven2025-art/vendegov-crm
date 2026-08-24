@@ -400,6 +400,7 @@ const el = {
   loginScreen: document.querySelector("#loginScreen"),
   appShell: document.querySelector("#appShell"),
   loginForm: document.querySelector("#loginForm"),
+  resetPasswordButton: document.querySelector("#resetPasswordButton"),
   nav: document.querySelector("#mainNav"),
   title: document.querySelector("#pageTitle"),
   kicker: document.querySelector("#pageKicker"),
@@ -616,14 +617,73 @@ async function enterSystem(email, password) {
     setCloudStatus(`Firebase conectado: ${user.email || "usuario autenticado"}.`);
     toast("Firebase conectado. Dados sincronizados.");
   } catch (error) {
-    setCloudStatus("Nao foi possivel entrar pelo Firebase. Verifique usuario e senha.");
-    toast("Nao foi possivel entrar pelo Firebase.");
+    const message = firebaseLoginMessage(error);
+    console.error("Firebase login error", error);
+    setCloudStatus(message);
+    toast(message);
     return false;
   }
   el.loginScreen.classList.add("hidden");
   el.appShell.classList.remove("hidden");
   setView("dashboard");
   return true;
+}
+
+function firebaseLoginMessage(error) {
+  const code = String(error?.code || "");
+  const message = String(error?.message || "");
+  if (code.includes("invalid-credential") || code.includes("wrong-password")) {
+    return "Senha incorreta ou ainda nao redefinida. Use o link recebido por e-mail.";
+  }
+  if (code.includes("user-not-found")) {
+    return "Usuario nao encontrado no Firebase Authentication.";
+  }
+  if (code.includes("operation-not-allowed")) {
+    return "Login por e-mail e senha nao esta ativado no Firebase.";
+  }
+  if (code.includes("too-many-requests")) {
+    return "Muitas tentativas. Aguarde alguns minutos e redefina a senha.";
+  }
+  if (code.includes("network-request-failed")) {
+    return "Falha de conexao com o Firebase. Confira a internet e tente novamente.";
+  }
+  if (code.includes("permission-denied") || /permission|insufficient/i.test(message)) {
+    return "Usuario autenticou, mas falta permissao na base do Firebase.";
+  }
+  return `Nao foi possivel entrar pelo Firebase${code ? ` (${code})` : ""}.`;
+}
+
+function firebaseResetMessage(error) {
+  const code = String(error?.code || "");
+  if (code.includes("user-not-found")) return "Esse e-mail nao esta cadastrado no Firebase.";
+  if (code.includes("invalid-email")) return "Informe um e-mail valido para redefinir a senha.";
+  if (code.includes("operation-not-allowed")) return "Redefinicao por e-mail nao esta ativada no Firebase.";
+  if (code.includes("too-many-requests")) return "Muitas tentativas. Aguarde alguns minutos antes de reenviar.";
+  return "Nao foi possivel enviar o e-mail de redefinicao.";
+}
+
+async function requestPasswordReset() {
+  if (!cloudEnabled() || !cloud()?.resetPassword) {
+    toast("Firebase nao esta pronto para redefinir senha.");
+    return;
+  }
+  const form = new FormData(el.loginForm);
+  const email = String(form.get("email") || "").trim();
+  if (!email) {
+    toast("Digite o e-mail para receber o link de redefinicao.");
+    return;
+  }
+  setCloudStatus("Enviando e-mail de redefinicao de senha...");
+  try {
+    await cloud().resetPassword(email);
+    setCloudStatus(`E-mail de redefinicao enviado para ${email}.`);
+    toast("Link de redefinicao enviado para o e-mail.");
+  } catch (error) {
+    const message = firebaseResetMessage(error);
+    console.error("Firebase reset password error", error);
+    setCloudStatus(message);
+    toast(message);
+  }
 }
 
 function saveDb(action, detail) {
@@ -663,6 +723,7 @@ function bindEvents() {
     const entered = await enterSystem(email, password);
     if (entered) toast("Bem-vindo ao VendeGov CRM.");
   });
+  el.resetPasswordButton.addEventListener("click", requestPasswordReset);
   el.logoutButton.addEventListener("click", async () => {
     if (cloudEnabled()) await cloud().signOut().catch(() => {});
     el.appShell.classList.add("hidden");
