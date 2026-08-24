@@ -603,25 +603,29 @@ async function enterSystem(email, password) {
     return false;
   }
   setCloudStatus("Conectando ao Firebase...");
+  let loggedUser = null;
+  let shouldReplaceDemoDb = false;
   try {
-    const user = await cloud().signIn(email, password);
+    loggedUser = await cloud().signIn(email, password);
     const remoteDb = await cloud().loadDb(emptyDb());
-    db = isDemoDb(remoteDb) ? emptyDb() : { ...emptyDb(), ...remoteDb };
-    const renewed = syncAllContractRenewals();
-    const automated = await processRenewalAutomation({ generateLetters: true });
-    if (isDemoDb(remoteDb)) {
-      await cloud().saveDb(db);
-    } else if (renewed || automated) {
-      await cloud().saveDb(db);
-    }
-    setCloudStatus(`Firebase conectado: ${user.email || "usuario autenticado"}.`);
-    toast("Firebase conectado. Dados sincronizados.");
+    shouldReplaceDemoDb = isDemoDb(remoteDb);
+    db = shouldReplaceDemoDb ? emptyDb() : { ...emptyDb(), ...remoteDb };
+    setCloudStatus(`Firebase conectado: ${loggedUser.email || "usuario autenticado"}.`);
+    toast("Firebase conectado. Dados carregados.");
   } catch (error) {
     const message = firebaseLoginMessage(error);
-    console.error("Firebase login error", error);
+    console.error("Firebase login/load error", error);
     setCloudStatus(message);
     toast(message);
     return false;
+  }
+  try {
+    const renewed = syncAllContractRenewals();
+    const automated = await processRenewalAutomation({ generateLetters: true });
+    if (shouldReplaceDemoDb || renewed || automated) await cloud().saveDb(db);
+  } catch (error) {
+    console.warn("Firebase post-login sync warning", error);
+    setCloudStatus("Firebase conectado. Sincronizacao automatica sera conferida depois.");
   }
   el.loginScreen.classList.add("hidden");
   el.appShell.classList.remove("hidden");
