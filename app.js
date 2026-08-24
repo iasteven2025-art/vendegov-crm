@@ -380,7 +380,7 @@ const state = {
   contractFormAiBusy: false,
   contractFormAiFile: null,
   contractFormAiExtraction: null,
-  renewalTab: "pendencias",
+  renewalTab: "vencer",
 };
 
 let db = emptyDb();
@@ -836,7 +836,7 @@ function renderCrud(moduleKey) {
 }
 
 function renderRenewals() {
-  const active = state.renewalTab || "pendencias";
+  const active = state.renewalTab || "vencer";
   const renewals = db.renovacoes || [];
   const pending90Raw = pendingRenewals(90);
   const pending90 = filtered(pending90Raw);
@@ -869,7 +869,7 @@ function renderRenewals() {
         ${renewalMetric("Pendencias (Planilha)", sheetIssuesRaw.length, "dados a revisar", "blue")}
         ${renewalMetric("Contratos a Vencer", pending90Raw.length, "proximos 90 dias", "amber")}
         ${renewalMetric("Renovadas", renewed.length, "tratativas concluidas", "green")}
-        ${renewalMetric("Valor em Risco (90d)", money(riskValue), "renovacoes abertas", "red")}
+        ${renewalMetric("Valor em Risco (90d)", moneyCents(riskValue), "renovacoes abertas", "red")}
       </div>
       <nav class="renewal-tabs" aria-label="Renovacoes">
         ${tabs.map(([key, label, count]) => renewalTabButton(key, label, count, active)).join("")}
@@ -901,7 +901,7 @@ function renewalTabBody(active, data) {
           <div><h2>Contratos a Vencer</h2><p>Lista operacional dos contratos com renovacao aberta nos proximos 90 dias.</p></div>
           <div class="toolbar-controls"><button class="secondary-button" data-run-renewal-automation type="button">Atualizar alertas</button><button class="primary-button" data-add="renovacoes" type="button">Nova Renovacao</button></div>
         </div>
-        ${data.pending90.length ? simpleTable(["Cliente", "Contrato", "Vencimento", "Marco", "Acompanhamento", "Carta", "Acoes"], data.pending90.map(renewalPendingRow)) : `<div class="empty-state">Nenhum contrato a vencer nos proximos 90 dias.</div>`}
+        ${data.pending90.length ? simpleTable(["Orgao / Contrato", "Vencimento", "Valor Mensal", "Status", "Carta de Renovacao", "Aditivos", "Resultado", ""], data.pending90.map(renewalContractDueRow)) : `<div class="empty-state">Nenhum contrato a vencer nos proximos 90 dias.</div>`}
       </section>
       <div class="grid-2 renewal-support-grid">
         <section class="panel renewal-rules">
@@ -1006,6 +1006,80 @@ function renewalIsDone(item) {
 
 function renewalRiskValue(rows) {
   return rows.reduce((total, item) => total + Number(item.value || 0), 0);
+}
+
+function renewalContractDueRow(item) {
+  return [
+    mainCell(item.client || "-", renewalContractNumber(item)),
+    renewalDueCell(item),
+    `<strong>${moneyCents(item.value || 0)}</strong>`,
+    renewalContractStatusPill(item),
+    renewalLetterAction(item),
+    renewalAddendumBadge(item),
+    renewalResultSelect(item),
+    `<button class="chevron-button" data-open="${escapeAttr(item.id)}" data-module="renovacoes" type="button">&gt;</button>`,
+  ];
+}
+
+function renewalContractNumber(item) {
+  const raw = cleanImport(item.contract || item.name);
+  return raw.replace(/^contrato\s+/i, "").replace(/\s+-\s+.+$/, "") || "-";
+}
+
+function renewalDueCell(item) {
+  const endDate = item.currentEnd || item.renewalDate;
+  const parsed = parseDate(endDate);
+  if (!parsed) {
+    return `<span>-</span><span class="due-status invalid">Data invalida</span>`;
+  }
+  const days = renewalDaysRemaining(item);
+  const label = days < 0 ? "Vencido" : days <= 15 ? "Critico" : days <= 30 ? "30 dias" : days <= 60 ? "60 dias" : "90 dias";
+  const tone = days < 0 || days <= 30 ? "red" : "yellow";
+  return `<span>${date(endDate)}</span><span class="due-status ${tone}">${label}</span>`;
+}
+
+function renewalContractStatusPill(item) {
+  if (item.stage === "Renovada" || item.emailStatus === "sent") return `<span class="soft-pill green">Renovado</span>`;
+  if (item.stage === "Perdida") return `<span class="soft-pill red">Perdido</span>`;
+  return `<span class="soft-pill">Vigente</span>`;
+}
+
+function renewalLetterAction(item) {
+  const label = item.letterDraft ? "Enviar" : "Gerar";
+  const action = item.letterDraft ? "data-renewal-email" : "data-renewal-generate";
+  return `<button class="letter-action" ${action}="${escapeAttr(item.id)}" type="button">Carta ${label}</button>`;
+}
+
+function renewalAddendumBadge(item) {
+  const count = renewalAddendumCount(item);
+  if (!count) return `<span class="record-subtitle">-</span>`;
+  return `<span class="addendum-pill">${count} aditivo(s)</span>`;
+}
+
+function renewalAddendumCount(item) {
+  const direct = Number(item.addendumCount || 0);
+  if (direct) return direct;
+  const contract = findContractForRenewal(item) || {};
+  const fromContract = Number(contract.addendumCount || 0);
+  if (fromContract) return fromContract;
+  const match = cleanImport(item.addendumNumber).match(/\d+/);
+  return match ? Number(match[0]) : 0;
+}
+
+function renewalResultSelect(item) {
+  const value = renewalResultValue(item);
+  const options = ["Pendente", "Em contato", "Proposta enviada", "Renovada", "Perdida"]
+    .map((option) => `<option value="${escapeAttr(option)}" ${option === value ? "selected" : ""}>${escapeHtml(option)}</option>`)
+    .join("");
+  return `<select class="renewal-result-select" data-renewal-result="${escapeAttr(item.id)}" aria-label="Resultado da renovacao">${options}</select>`;
+}
+
+function renewalResultValue(item) {
+  if (item.stage === "Renovada") return "Renovada";
+  if (item.stage === "Perdida") return "Perdida";
+  if (item.stage === "Proposta enviada") return "Proposta enviada";
+  if (item.stage === "Em contato" || item.stage === "Negociacao") return "Em contato";
+  return "Pendente";
 }
 
 function renewalPendingRow(item) {
@@ -2243,6 +2317,7 @@ function bindDynamicActions() {
   document.querySelectorAll("[data-renewal-generate]").forEach((button) => button.addEventListener("click", () => generateStoredRenewalLetter(button.dataset.renewalGenerate)));
   document.querySelectorAll("[data-renewal-email]").forEach((button) => button.addEventListener("click", () => emailRenewalLetter(button.dataset.renewalEmail)));
   document.querySelectorAll("[data-renewal-mark-sent]").forEach((button) => button.addEventListener("click", () => markRenewalLetterSent(button.dataset.renewalMarkSent)));
+  document.querySelectorAll("[data-renewal-result]").forEach((select) => select.addEventListener("change", () => updateRenewalResult(select.dataset.renewalResult, select.value)));
   document.querySelectorAll("[data-renewal-tab]").forEach((button) => button.addEventListener("click", () => {
     state.renewalTab = button.dataset.renewalTab;
     renderRenewals();
@@ -2337,6 +2412,26 @@ function markRenewalLetterSent(id) {
   saveDb("Registrou envio de carta", renewal.contract || renewal.name || id);
   render();
   toast("Envio registrado na renovacao.");
+}
+
+function updateRenewalResult(id, result) {
+  const renewal = (db.renovacoes || []).find((item) => item.id === id);
+  if (!renewal) return;
+  const map = {
+    "Pendente": ["Mapeada", "yellow"],
+    "Em contato": ["Em contato", "yellow"],
+    "Proposta enviada": ["Proposta enviada", "cyan"],
+    "Renovada": ["Renovada", "green"],
+    "Perdida": ["Perdida", "red"],
+  };
+  const [stage, status] = map[result] || map.Pendente;
+  renewal.stage = stage;
+  renewal.status = status;
+  renewal.followUpAt = today();
+  renewal.updatedAt = now();
+  saveDb("Atualizou resultado da renovacao", `${renewal.contract || renewal.name || id}: ${result}`);
+  renderRenewals();
+  toast("Resultado atualizado.");
 }
 
 function renewalMailtoLink(renewal) {
@@ -2815,6 +2910,7 @@ function importContractsRows(rows, fileName, targetView = "contratos") {
   }).catch(() => {});
   saveDb("Importou contratos", `${created} novos, ${updated} atualizados, ${skipped} ignorados - ${fileName}`);
   updateLoginNumbers();
+  if (targetView === "renovacoes") state.renewalTab = "vencer";
   setView(targetView);
   toast(`${created} contratos importados, ${updated} atualizados.`);
 }
@@ -3432,6 +3528,11 @@ function bar(label, value, width) {
 function money(value) {
   const number = Number(value || 0);
   return number.toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 });
+}
+
+function moneyCents(value) {
+  const number = Number(value || 0);
+  return number.toLocaleString("pt-BR", { style: "currency", currency: "BRL", minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 function date(value) {
