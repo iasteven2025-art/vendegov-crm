@@ -25,6 +25,24 @@
     return ["tenants", tenantId(), "snapshots", "main"];
   }
 
+  function cleanForFirestore(value) {
+    if (value === undefined) return null;
+    if (value === null) return null;
+    if (value instanceof Date) return value.toISOString();
+    if (Array.isArray(value)) return value.map((item) => cleanForFirestore(item));
+    if (typeof value === "object") {
+      if (typeof File !== "undefined" && value instanceof File) return null;
+      if (typeof Blob !== "undefined" && value instanceof Blob) return null;
+      const clean = {};
+      Object.entries(value).forEach(([key, entry]) => {
+        if (entry !== undefined && typeof entry !== "function") clean[key] = cleanForFirestore(entry);
+      });
+      return clean;
+    }
+    if (typeof value === "function") return null;
+    return value;
+  }
+
   function loadLibs() {
     if (!configured) return Promise.resolve(null);
     if (libsPromise) return libsPromise;
@@ -96,7 +114,7 @@
     const snap = await libs.firestoreLib.getDoc(ref);
     if (snap.exists() && snap.data().db) return snap.data().db;
     await libs.firestoreLib.setDoc(ref, {
-      db: seedData,
+      db: cleanForFirestore(seedData),
       tenantId: tenantId(),
       createdAt: libs.firestoreLib.serverTimestamp(),
       updatedAt: libs.firestoreLib.serverTimestamp(),
@@ -113,7 +131,7 @@
     await libs.firestoreLib.setDoc(
       ref,
       {
-        db: data,
+        db: cleanForFirestore(data),
         tenantId: tenantId(),
         updatedAt: libs.firestoreLib.serverTimestamp(),
         updatedBy: auth.currentUser.email || auth.currentUser.uid,
