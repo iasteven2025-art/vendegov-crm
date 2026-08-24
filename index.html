@@ -6,7 +6,7 @@
     <title>VendeGov CRM - Sistema</title>
     <meta name="description" content="Sistema VendeGov CRM para empresas que vendem ao governo." />
     <link rel="icon" href="./assets/vendegov-crm-simbolo.svg" />
-    <link rel="stylesheet" href="./styles.css?v=20260824-renewal-table" />
+    <link rel="stylesheet" href="./styles.css?v=20260824-renewal-letter" />
   </head>
   <body>
     <section class="login-screen" id="loginScreen">
@@ -99,6 +99,21 @@
       </section>
     </div>
 
+    <div class="modal-backdrop hidden" id="letterModal">
+      <section class="modal letter-modal" role="dialog" aria-modal="true" aria-labelledby="letterModalTitle">
+        <header class="modal-header">
+          <div>
+            <p class="eyebrow" id="letterModalKicker">Carta de renovacao</p>
+            <h2 id="letterModalTitle">Carta</h2>
+          </div>
+          <button class="icon-button quiet" id="closeLetterModal" type="button" aria-label="Fechar">x</button>
+        </header>
+        <div class="letter-modal-tabs" id="letterModalTabs"></div>
+        <div class="letter-modal-body" id="letterModalBody"></div>
+        <footer class="letter-modal-footer" id="letterModalFooter"></footer>
+      </section>
+    </div>
+
     <div class="drawer-backdrop hidden" id="drawerBackdrop"></div>
     <aside class="detail-drawer hidden" id="detailDrawer" aria-label="Detalhes do registro">
       <header class="drawer-header">
@@ -131,8 +146,8 @@
 
     <input id="importFile" type="file" accept=".json,.csv,application/json,text/csv" hidden />
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
-    <script src="./firebase-config.js?v=20260824-renewal-table"></script>
-    <script src="./firebase-adapter.js?v=20260824-renewal-table"></script>
-    <script src="./app.js?v=20260824-renewal-table"></script>
+    <script src="./firebase-config.js?v=20260824-renewal-letter"></script>
+    <script src="./firebase-adapter.js?v=20260824-renewal-letter"></script>
+    <script src="./app.js?v=20260824-renewal-letter"></script>
   </body>
 </html>
