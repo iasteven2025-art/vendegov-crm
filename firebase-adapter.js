@@ -16,6 +16,7 @@
   let ai = null;
   let user = null;
   let libsPromise = null;
+  let runtimeAiSettings = {};
 
   function tenantId() {
     return settings.tenantId || "computeck-demo";
@@ -185,20 +186,35 @@
     return docRef.id;
   }
 
+  function setAiConfig(config = {}) {
+    runtimeAiSettings = { ...(config || {}) };
+    ai = null;
+  }
+
   function aiSettings() {
-    return settings.ai || {};
+    return { ...(settings.ai || {}), ...(runtimeAiSettings || {}) };
+  }
+
+  function aiProvider() {
+    return aiSettings().provider || "firebase-ai-logic";
   }
 
   function aiModelName() {
     return aiSettings().model || "gemini-3.6-flash";
   }
 
+  function aiEndpoint() {
+    return aiSettings().endpointUrl || aiSettings().endpoint || "";
+  }
+
   function aiEnabled() {
-    return configured && aiSettings().enabled !== false;
+    if (aiSettings().enabled === false) return false;
+    if (aiProvider() === "firebase-ai-logic") return configured;
+    return Boolean(aiEndpoint());
   }
 
   async function getAiModel() {
-    if (!aiEnabled()) throw new Error("IA nao configurada. Ative o Firebase AI Logic no projeto.");
+    if (!aiEnabled() || aiProvider() !== "firebase-ai-logic") throw new Error("IA nao configurada. Confira Parametros > IA.");
     const ctx = await init();
     const libs = await loadLibs();
     if (!ai) ai = libs.aiLib.getAI(ctx.app, { backend: new libs.aiLib.GoogleAIBackend() });
@@ -220,6 +236,44 @@
     };
   }
 
+  async function fileToBase64Payload(file) {
+    const data = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = () => reject(new Error("Nao foi possivel ler o arquivo."));
+      reader.onloadend = () => resolve(String(reader.result || "").split(",")[1] || "");
+      reader.readAsDataURL(file);
+    });
+    return {
+      name: file.name,
+      mimeType: file.type || "application/pdf",
+      size: file.size,
+      data,
+    };
+  }
+
+  async function customAiRequest(task, payload) {
+    const endpoint = aiEndpoint();
+    if (!endpoint) throw new Error("Endpoint seguro de IA nao configurado.");
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        task,
+        provider: aiProvider(),
+        model: aiModelName(),
+        tenantId: tenantId(),
+        payload,
+      }),
+    });
+    const text = await response.text();
+    if (!response.ok) throw new Error(text || "A IA retornou erro.");
+    try {
+      return JSON.parse(text);
+    } catch {
+      return { text };
+    }
+  }
+
   function parseJsonResponse(text) {
     const clean = String(text || "").trim().replace(/^```(?:json)?/i, "").replace(/```$/i, "").trim();
     try {
@@ -234,8 +288,6 @@
   async function analyzeContractFile(file) {
     if (!file) throw new Error("Selecione um PDF de contrato.");
     if (file.size > 18 * 1024 * 1024) throw new Error("O PDF precisa ter ate 18 MB para analise direta.");
-    const model = await getAiModel();
-    const filePart = await fileToGenerativePart(file);
     const prompt = `
 Voce e um assistente juridico-operacional do VendeGov CRM para empresas que vendem ao governo.
 Leia o documento enviado e extraia os dados do contrato publico.
@@ -265,6 +317,16 @@ Responda somente JSON valido, sem markdown, neste formato:
   "resumo": ""
 }
 Use strings vazias quando uma informacao nao estiver no documento. Valores devem ser numero em reais, sem separador de milhar.`;
+    if (aiProvider() !== "firebase-ai-logic") {
+      const custom = await customAiRequest("analyzeContractFile", {
+        prompt,
+        file: await fileToBase64Payload(file),
+      });
+      const parsed = custom.result || custom.data || custom;
+      return typeof parsed === "string" ? parseJsonResponse(parsed) : parsed;
+    }
+    const model = await getAiModel();
+    const filePart = await fileToGenerativePart(file);
     const result = await model.generateContent([prompt, filePart]);
     const text = result.response.text() || "";
     return parseJsonResponse(text);
@@ -272,7 +334,6 @@ Use strings vazias quando uma informacao nao estiver no documento. Valores devem
 
   async function generateRenewalLetter(contract, renewal = {}) {
     if (!contract) throw new Error("Selecione um contrato.");
-    const model = await getAiModel();
     const prompt = `
 Voce e o assistente de renovacoes do VendeGov CRM.
 Gere uma carta profissional de renovacao contratual em portugues do Brasil, pronta para envio a uma empresa cliente.
@@ -285,6 +346,15 @@ ${JSON.stringify(contract, null, 2)}
 Dados da renovacao vinculada:
 ${JSON.stringify(renewal || {}, null, 2)}
 `;
+    if (aiProvider() !== "firebase-ai-logic") {
+      const custom = await customAiRequest("generateRenewalLetter", {
+        prompt,
+        contract,
+        renewal,
+      });
+      return custom.text || custom.letter || custom.result || "";
+    }
+    const model = await getAiModel();
     const result = await model.generateContent(prompt);
     return result.response.text() || "";
   }
@@ -301,6 +371,7 @@ ${JSON.stringify(renewal || {}, null, 2)}
     saveDb,
     uploadFile,
     queueEmail,
+    setAiConfig,
     aiEnabled,
     aiModelName,
     analyzeContractFile,
