@@ -380,6 +380,7 @@ const state = {
   contractFormAiBusy: false,
   contractFormAiFile: null,
   contractFormAiExtraction: null,
+  renewalTab: "pendencias",
 };
 
 let db = emptyDb();
@@ -716,6 +717,7 @@ function viewMeta(view) {
   if (view === "dashboard") return { title: "Painel executivo", kicker: "Visao geral" };
   if (view === "cliente") return { title: "Ficha do cliente", kicker: "Carteira" };
   if (view === "ia") return { title: "IA Gemini", kicker: "Automacao operacional" };
+  if (view === "renovacoes") return { title: "Renovacoes de Contratos", kicker: "Acompanhamento" };
   if (view === "relatorios") return { title: "Relatorios", kicker: "Vendas, gestao e comissoes" };
   if (view === "configuracoes") return { title: "Parametrizacao", kicker: "Administracao" };
   return { title: schemas[view].title, kicker: "Modulo" };
@@ -834,77 +836,176 @@ function renderCrud(moduleKey) {
 }
 
 function renderRenewals() {
-  const schema = schemas.renovacoes;
-  const pending = filtered(pendingRenewals(90));
-  const allRows = filtered(db.renovacoes || []);
+  const active = state.renewalTab || "pendencias";
+  const renewals = db.renovacoes || [];
+  const pending90Raw = pendingRenewals(90);
+  const pending90 = filtered(pending90Raw);
+  const expiring = filtered(pending90Raw.filter((item) => renewalDaysRemaining(item) >= 0));
+  const sheetIssuesRaw = renewals.filter(renewalSheetIssue);
+  const sheetIssues = filtered(sheetIssuesRaw);
+  const renewed = renewals.filter(renewalIsDone);
+  const letters = filtered(renewals.filter((item) => item.letterDraft || (item.emailStatus || "pending") !== "pending" || renewalDaysRemaining(item) <= 15));
   const notifications = (db.notificacoes || []).slice(0, 12);
-  const critical = pending.filter((item) => renewalDaysRemaining(item) <= 30).length;
-  const readyLetters = (db.renovacoes || []).filter((item) => item.emailStatus === "ready").length;
-  const blockedLetters = (db.renovacoes || []).filter((item) => item.emailStatus === "blocked").length;
-  const openNotifications = (db.notificacoes || []).filter((item) => !item.read).length;
+  const riskValue = renewalRiskValue(pending90Raw);
+  const tabs = [
+    ["pendencias", "Pendencias da Planilha", sheetIssuesRaw.length],
+    ["vencer", "Contratos a Vencer", pending90Raw.length],
+    ["planilhas", "Planilhas", renewals.length],
+    ["cartas", "Cartas de Renovacao", letters.length],
+  ];
   el.content.innerHTML = `
-    <div class="metric-grid">
-      ${metric("Pendencias 90 dias", pending.length, "renovacoes abertas")}
-      ${metric("Criticas", critical, "ate 30 dias ou vencidas")}
-      ${metric("Cartas prontas", readyLetters, `${blockedLetters} sem e-mail do cliente`)}
-      ${metric("Notificacoes", openNotifications, "avisos de 60, 45 e 30 dias")}
-    </div>
-    <section class="table-panel">
-      <div class="table-toolbar">
+    <section class="renewal-dashboard">
+      <div class="renewal-header">
         <div>
-          <h2>Pendencias dos proximos 90 dias</h2>
-          <p>Contratos com vigencia a vencer, marcos de aviso e carta automatica em 15 dias sem acompanhamento.</p>
+          <h2><span class="renewal-title-icon">RN</span>Renovacoes de Contratos</h2>
+          <p>Acompanhe pendencias da planilha e contratos a vencer, integrados com cartas e aditivos.</p>
         </div>
-        <div class="toolbar-controls">
+        <div class="renewal-header-actions">
           <button class="secondary-button" data-run-renewal-automation type="button">Atualizar alertas</button>
-          <button class="primary-button" data-add="renovacoes" type="button">Nova renovacao</button>
+          <button class="primary-button" data-import-renewal-sheet type="button">Importar Planilha</button>
         </div>
       </div>
-      ${pending.length ? simpleTable(["Cliente", "Contrato", "Vencimento", "Marco", "Acompanhamento", "Carta", "Acoes"], pending.map(renewalPendingRow)) : `<div class="empty-state">Nenhuma pendencia de renovacao nos proximos 90 dias.</div>`}
-    </section>
-    <div class="grid-2">
-      <section class="panel renewal-rules">
-        <div class="panel-header">
-          <div><h2>Regra automatica</h2><p>O sistema monitora a vigencia e prepara a comunicacao antes do vencimento.</p></div>
-        </div>
-        <div class="automation-steps">
-          ${automationStep("60", "Primeiro aviso", "abre notificacao preventiva")}
-          ${automationStep("45", "Segundo aviso", "reforca tratativa comercial")}
-          ${automationStep("30", "Aviso critico", "prioriza decisao e documentos")}
-          ${automationStep("15", "Carta automatica", "gera minuta se nao houver acompanhamento")}
-        </div>
-      </section>
-      <section class="panel">
-        <div class="panel-header">
-          <div><h2>Notificacoes geradas</h2><p>Historico dos avisos criados pela rotina de renovacao.</p></div>
-        </div>
-        ${renewalNotificationsTable(notifications)}
-      </section>
-    </div>
-    <section class="table-panel">
-      <div class="table-toolbar">
-        <div><h2>${schema.title}</h2><p>${schema.desc}</p></div>
-        <div class="toolbar-controls">
-          <select class="select" id="statusFilter" aria-label="Filtrar status">
-            <option value="todos">Todos os status</option>
-            <option value="green">Renovadas</option>
-            <option value="cyan">Em andamento</option>
-            <option value="yellow">Atencao</option>
-            <option value="red">Risco</option>
-          </select>
-          <button class="primary-button" data-add="renovacoes" type="button">Nova renovacao</button>
-        </div>
+      <div class="renewal-kpi-grid">
+        ${renewalMetric("Pendencias (Planilha)", sheetIssuesRaw.length, "dados a revisar", "blue")}
+        ${renewalMetric("Contratos a Vencer", pending90Raw.length, "proximos 90 dias", "amber")}
+        ${renewalMetric("Renovadas", renewed.length, "tratativas concluidas", "green")}
+        ${renewalMetric("Valor em Risco (90d)", money(riskValue), "renovacoes abertas", "red")}
       </div>
-      ${allRows.length ? crudTable("renovacoes", allRows) : `<div class="empty-state">Nenhuma renovacao cadastrada.</div>`}
+      <nav class="renewal-tabs" aria-label="Renovacoes">
+        ${tabs.map(([key, label, count]) => renewalTabButton(key, label, count, active)).join("")}
+      </nav>
+      <div class="renewal-tab-panel">
+        ${renewalTabBody(active, { sheetIssues, pending90, expiring, renewals: filtered(renewals), letters, notifications })}
+      </div>
     </section>
   `;
-  const filter = document.querySelector("#statusFilter");
-  filter.value = state.status;
-  filter.addEventListener("change", (event) => {
-    state.status = event.target.value;
-    renderRenewals();
-  });
   bindDynamicActions();
+}
+
+function renewalTabBody(active, data) {
+  if (active === "pendencias") {
+    return `
+      <section class="table-panel renewal-table-panel">
+        <div class="table-toolbar">
+          <div><h2>Pendencias da Planilha</h2><p>Campos importados que precisam de complemento para a automacao funcionar sem bloqueio.</p></div>
+          <div class="toolbar-controls"><button class="secondary-button" data-import-renewal-sheet type="button">Importar Planilha</button></div>
+        </div>
+        ${data.sheetIssues.length ? simpleTable(["Pendencia", "Cliente", "Contrato", "Prazo", "Acoes"], data.sheetIssues.map(renewalIssueRow)) : `<div class="empty-state">Nenhuma pendencia critica encontrada na planilha.</div>`}
+      </section>
+    `;
+  }
+  if (active === "vencer") {
+    return `
+      <section class="table-panel renewal-table-panel">
+        <div class="table-toolbar">
+          <div><h2>Contratos a Vencer</h2><p>Lista operacional dos contratos com renovacao aberta nos proximos 90 dias.</p></div>
+          <div class="toolbar-controls"><button class="secondary-button" data-run-renewal-automation type="button">Atualizar alertas</button><button class="primary-button" data-add="renovacoes" type="button">Nova Renovacao</button></div>
+        </div>
+        ${data.pending90.length ? simpleTable(["Cliente", "Contrato", "Vencimento", "Marco", "Acompanhamento", "Carta", "Acoes"], data.pending90.map(renewalPendingRow)) : `<div class="empty-state">Nenhum contrato a vencer nos proximos 90 dias.</div>`}
+      </section>
+      <div class="grid-2 renewal-support-grid">
+        <section class="panel renewal-rules">
+          <div class="panel-header"><div><h2>Regra automatica</h2><p>O sistema monitora a vigencia e prepara a comunicacao antes do vencimento.</p></div></div>
+          <div class="automation-steps">
+            ${automationStep("60", "Primeiro aviso", "abre notificacao preventiva")}
+            ${automationStep("45", "Segundo aviso", "reforca tratativa comercial")}
+            ${automationStep("30", "Aviso critico", "prioriza decisao e documentos")}
+            ${automationStep("15", "Carta automatica", "gera minuta se nao houver acompanhamento")}
+          </div>
+        </section>
+        <section class="panel">
+          <div class="panel-header"><div><h2>Notificacoes geradas</h2><p>Historico dos avisos criados pela rotina de renovacao.</p></div></div>
+          ${renewalNotificationsTable(data.notifications)}
+        </section>
+      </div>
+    `;
+  }
+  if (active === "planilhas") {
+    return `
+      <section class="table-panel renewal-table-panel">
+        <div class="table-toolbar">
+          <div><h2>Planilhas Importadas</h2><p>Base de renovacoes criada a partir dos contratos importados ou cadastrados.</p></div>
+          <div class="toolbar-controls"><button class="secondary-button" data-import-renewal-sheet type="button">Importar Planilha</button><button class="primary-button" data-add="renovacoes" type="button">Nova Renovacao</button></div>
+        </div>
+        ${data.renewals.length ? simpleTable(["Registro", "Cliente", "Contrato", "Vigencia", "Status", "Acoes"], data.renewals.map(renewalSpreadsheetRow)) : `<div class="empty-state">Nenhuma planilha importada para renovacoes.</div>`}
+      </section>
+    `;
+  }
+  return `
+    <section class="table-panel renewal-table-panel">
+      <div class="table-toolbar">
+        <div><h2>Cartas de Renovacao</h2><p>Cartas geradas automaticamente ou prontas para envio ao cliente com copia ao consultor.</p></div>
+        <div class="toolbar-controls"><button class="secondary-button" data-run-renewal-automation type="button">Gerar pendentes</button></div>
+      </div>
+      ${data.letters.length ? simpleTable(["Cliente", "Contrato", "Carta", "Envio", "Acoes"], data.letters.map(renewalLetterRow)) : `<div class="empty-state">Nenhuma carta de renovacao gerada ainda.</div>`}
+    </section>
+  `;
+}
+
+function renewalMetric(label, value, hint, tone) {
+  return `<article class="renewal-kpi ${tone}"><div><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong><small>${escapeHtml(hint)}</small></div><b>${renewalMetricIcon(tone)}</b></article>`;
+}
+
+function renewalMetricIcon(tone) {
+  return { blue: "PL", amber: "90", green: "OK", red: "!" }[tone] || "RN";
+}
+
+function renewalTabButton(key, label, count, active) {
+  return `<button class="${key === active ? "active" : ""}" data-renewal-tab="${key}" type="button">${escapeHtml(label)}<span>${count}</span></button>`;
+}
+
+function renewalSheetIssue(renewal) {
+  return Boolean(renewalIssueSummary(renewal));
+}
+
+function renewalIssueSummary(renewal) {
+  const issues = [];
+  if (!cleanImport(renewal.client)) issues.push("cliente");
+  if (!cleanImport(renewal.contract)) issues.push("contrato");
+  if (!cleanImport(renewal.currentEnd || renewal.renewalDate)) issues.push("vigencia");
+  if (!cleanImport(renewal.clientEmail)) issues.push("e-mail do cliente");
+  if (!cleanImport(renewal.consultantEmail)) issues.push("consultor");
+  return issues.join(", ");
+}
+
+function renewalIssueRow(item) {
+  return [
+    mainCell("Completar dados", renewalIssueSummary(item)),
+    item.client || "-",
+    item.contract || item.name || "-",
+    date(item.currentEnd || item.renewalDate),
+    `<div class="row-actions"><button class="mini-button" data-edit="${escapeAttr(item.id)}" data-module="renovacoes" type="button">Corrigir</button><button class="mini-button" data-open="${escapeAttr(item.id)}" data-module="renovacoes" type="button">Abrir</button></div>`,
+  ];
+}
+
+function renewalSpreadsheetRow(item) {
+  return [
+    mainCell(item.name, item.addendumNumber || item.stage),
+    item.client || "-",
+    item.contract || "-",
+    `${date(item.currentEnd || item.renewalDate)}<br><span class="record-subtitle">${daysLabel(renewalDaysRemaining(item))}</span>`,
+    badge(item.status || "cyan"),
+    rowButton("renovacoes", item.id),
+  ];
+}
+
+function renewalLetterRow(item) {
+  const hasDraft = Boolean(item.letterDraft);
+  return [
+    mainCell(item.client, item.clientEmail || "sem e-mail do cliente"),
+    mainCell(item.contract || item.name, date(item.currentEnd || item.renewalDate)),
+    hasDraft ? mainCell(item.letterSubject || "Carta de renovacao", item.letterGeneratedAt ? `gerada em ${date(item.letterGeneratedAt)}` : "gerada") : `<span class="status status-cyan">Nao gerada</span>`,
+    emailStatusBadge(item.emailStatus || "pending"),
+    renewalRowActions(item),
+  ];
+}
+
+function renewalIsDone(item) {
+  return item.stage === "Renovada" || item.status === "green" || item.emailStatus === "sent";
+}
+
+function renewalRiskValue(rows) {
+  return rows.reduce((total, item) => total + Number(item.value || 0), 0);
 }
 
 function renewalPendingRow(item) {
@@ -2142,6 +2243,15 @@ function bindDynamicActions() {
   document.querySelectorAll("[data-renewal-generate]").forEach((button) => button.addEventListener("click", () => generateStoredRenewalLetter(button.dataset.renewalGenerate)));
   document.querySelectorAll("[data-renewal-email]").forEach((button) => button.addEventListener("click", () => emailRenewalLetter(button.dataset.renewalEmail)));
   document.querySelectorAll("[data-renewal-mark-sent]").forEach((button) => button.addEventListener("click", () => markRenewalLetterSent(button.dataset.renewalMarkSent)));
+  document.querySelectorAll("[data-renewal-tab]").forEach((button) => button.addEventListener("click", () => {
+    state.renewalTab = button.dataset.renewalTab;
+    renderRenewals();
+  }));
+  document.querySelectorAll("[data-import-renewal-sheet]").forEach((button) => button.addEventListener("click", () => {
+    el.importFile.dataset.mode = "renovacoes";
+    el.importFile.accept = ".csv,text/csv,application/vnd.ms-excel";
+    el.importFile.click();
+  }));
   const contractSelect = document.querySelector("#aiContractSelect");
   if (contractSelect) {
     contractSelect.addEventListener("change", (event) => {
@@ -2652,6 +2762,7 @@ function importBase44Csv(text, fileName, mode = "") {
   const rows = csvToObjects(text);
   if (!rows.length) throw new Error("CSV vazio");
   const headers = Object.keys(rows[0]);
+  if (mode === "renovacoes") return importContractsRows(rows, fileName, "renovacoes");
   if (mode === "contratos" || headers.includes("numero_contrato")) return importContractsRows(rows, fileName);
   if (mode === "clientes" || (headers.includes("nome_exibicao") && headers.includes("municipio"))) return importClientsRows(rows, fileName);
   if (mode === "usuarios" || headers.includes("consultor_email")) return importConsultantsRows(rows, fileName);
@@ -2663,7 +2774,7 @@ function importContractsCsv(text, fileName) {
   return importContractsRows(rows, fileName);
 }
 
-function importContractsRows(rows, fileName) {
+function importContractsRows(rows, fileName, targetView = "contratos") {
   if (!rows.length) throw new Error("CSV vazio");
   let created = 0;
   let updated = 0;
@@ -2698,9 +2809,13 @@ function importContractsRows(rows, fileName) {
   });
   db.contratos = contracts;
   contracts.forEach((contract) => syncContractRenewal(contract));
+  processRenewalAutomation({ generateLetters: true }).then((changed) => {
+    if (changed) saveDb("Atualizou alertas de renovacao", `${changed} alteracao(oes) apos importacao`);
+    if (state.view === targetView) render();
+  }).catch(() => {});
   saveDb("Importou contratos", `${created} novos, ${updated} atualizados, ${skipped} ignorados - ${fileName}`);
   updateLoginNumbers();
-  setView("contratos");
+  setView(targetView);
   toast(`${created} contratos importados, ${updated} atualizados.`);
 }
 
