@@ -91,6 +91,12 @@ button {
   max-width: 390px;
 }
 
+.login-reset {
+  justify-self: center;
+  min-height: 32px;
+  color: var(--green-2);
+}
+
 .login-form label,
 .record-form label {
   display: grid;

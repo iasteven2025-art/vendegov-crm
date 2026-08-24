@@ -81,6 +81,13 @@
     user = null;
   }
 
+  async function resetPassword(email) {
+    if (!configured) throw new Error("Firebase nao configurado.");
+    const ctx = await init();
+    const libs = await loadLibs();
+    await libs.authLib.sendPasswordResetEmail(ctx.auth, email);
+  }
+
   async function loadDb(seedData) {
     if (!configured) return seedData;
     const ctx = await init();
@@ -270,6 +277,7 @@ ${JSON.stringify(renewal || {}, null, 2)}
     tenantId,
     init,
     signIn,
+    resetPassword,
     signOut: signOutUser,
     loadDb,
     saveDb,
