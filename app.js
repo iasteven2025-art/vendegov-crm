@@ -95,6 +95,7 @@ const schemas = {
       field("name", "Contrato", "text", true),
       field("client", "Cliente", "text", true),
       field("agency", "Orgao comprador", "text"),
+      field("responsibleCompany", "Empresa responsavel", "text"),
       field("object", "Objeto", "textarea"),
       field("legalBasis", "Fundamento legal", "text"),
       field("legalRegime", "Regime legal", "select", true, ["Lei 14.133/2021", "Lei 8.666/1993", "Outro"]),
@@ -152,6 +153,7 @@ const schemas = {
       field("client", "Cliente", "text", true),
       field("contract", "Contrato", "text", true),
       field("value", "Valor previsto", "number"),
+      field("responsibleCompany", "Empresa responsavel", "text"),
       field("legalRegime", "Regime legal", "select", true, ["Lei 14.133/2021", "Lei 8.666/1993", "Outro"]),
       field("addendumType", "Tipo de aditivo", "select", true, ["Prorrogacao de prazo", "Reajuste", "Reequilibrio", "Acrescimo/supressao", "Renovacao comercial", "Outro"]),
       field("currentEnd", "Vigencia atual ate", "date"),
@@ -292,6 +294,12 @@ const schemas = {
     fields: [
       field("name", "Empresa", "text", true),
       field("region", "Regiao", "select", true, ["Norte", "Nordeste", "Centro-Oeste", "Sudeste", "Sul", "Nacional"]),
+      field("cnpj", "CNPJ", "text"),
+      field("email", "E-mail do timbre", "email"),
+      field("phone", "Telefone do timbre", "text"),
+      field("address", "Endereco do timbre", "text"),
+      field("city", "Cidade/UF", "text"),
+      field("logoUrl", "Logo do timbre", "url"),
       field("portfolio", "Carteira", "text"),
       field("manager", "Gestor", "text"),
       field("status", "Status", "select", true, [["green", "Ativa"], ["yellow", "Implantacao"], ["red", "Inativa"]]),
@@ -381,6 +389,8 @@ const state = {
   contractFormAiFile: null,
   contractFormAiExtraction: null,
   renewalTab: "vencer",
+  letterRenewalId: "",
+  letterTab: "preview",
 };
 
 let db = emptyDb();
@@ -404,6 +414,13 @@ const el = {
   modalTitle: document.querySelector("#modalTitle"),
   modalKicker: document.querySelector("#modalKicker"),
   closeModal: document.querySelector("#closeModal"),
+  letterModal: document.querySelector("#letterModal"),
+  letterModalKicker: document.querySelector("#letterModalKicker"),
+  letterModalTitle: document.querySelector("#letterModalTitle"),
+  letterModalTabs: document.querySelector("#letterModalTabs"),
+  letterModalBody: document.querySelector("#letterModalBody"),
+  letterModalFooter: document.querySelector("#letterModalFooter"),
+  closeLetterModal: document.querySelector("#closeLetterModal"),
   confirmModal: document.querySelector("#confirmModal"),
   confirmText: document.querySelector("#confirmText"),
   cancelDelete: document.querySelector("#cancelDelete"),
@@ -443,10 +460,10 @@ function seedDb() {
       record({ name: "Suporte 24x7 - Universidade", client: "TechVia Servicos", licitation: "Dispensa 77/2026", value: 98000, margin: 27, status: "cyan", sentAt: "", validUntil: "2026-08-28", owner: "Steven Passos", notes: "Gerada por IA e template comercial." }),
     ],
     contratos: [
-      record({ name: "Contrato 021/2026", client: "Construtora Vale Norte", agency: "Secretaria de Obras", value: 1800000, monthly: 150000, status: "green", start: "2026-02-01", end: "2027-01-31", renewal: "2026-12-10", adjustment: "IPCA", owner: "Mariana Costa", notes: "Contrato principal da carteira." }),
-      record({ name: "Contrato 114/2025", client: "MedSupply Brasil", agency: "Hospital Regional Norte", value: 742000, monthly: 61833, status: "yellow", start: "2025-10-01", end: "2026-09-30", renewal: "2026-09-05", adjustment: "IGP-M", owner: "Rafael Lima", notes: "Renovacao em andamento." }),
-      record({ name: "Contrato 044/2026", client: "Alfa Mobilidade", agency: "Consorcio de Transporte", value: 964000, monthly: 80333, status: "cyan", start: "2026-01-15", end: "2026-12-15", renewal: "2026-11-01", adjustment: "IPCA + 2%", owner: "Financeiro", notes: "Reajuste pendente de validacao." }),
-      record({ name: "Contrato 087/2024", client: "Nutriplan Alimentos", agency: "Prefeitura Municipal", value: 526000, monthly: 43833, status: "red", start: "2024-09-01", end: "2026-08-31", renewal: "2026-08-24", adjustment: "Sem indice definido", owner: "Equipe docs", notes: "Risco por pendencia documental." }),
+      record({ name: "Contrato 021/2026", client: "Construtora Vale Norte", agency: "Secretaria de Obras", responsibleCompany: "Computeck Solucoes Inteligentes", value: 1800000, monthly: 150000, status: "green", start: "2026-02-01", end: "2027-01-31", renewal: "2026-12-10", adjustment: "IPCA", owner: "Mariana Costa", notes: "Contrato principal da carteira." }),
+      record({ name: "Contrato 114/2025", client: "MedSupply Brasil", agency: "Hospital Regional Norte", responsibleCompany: "Computeck Solucoes Inteligentes", value: 742000, monthly: 61833, status: "yellow", start: "2025-10-01", end: "2026-09-30", renewal: "2026-09-05", adjustment: "IGP-M", owner: "Rafael Lima", notes: "Renovacao em andamento." }),
+      record({ name: "Contrato 044/2026", client: "Alfa Mobilidade", agency: "Consorcio de Transporte", responsibleCompany: "Grupo Actcon", value: 964000, monthly: 80333, status: "cyan", start: "2026-01-15", end: "2026-12-15", renewal: "2026-11-01", adjustment: "IPCA + 2%", owner: "Financeiro", notes: "Reajuste pendente de validacao." }),
+      record({ name: "Contrato 087/2024", client: "Nutriplan Alimentos", agency: "Prefeitura Municipal", responsibleCompany: "Grupo Actcon", value: 526000, monthly: 43833, status: "red", start: "2024-09-01", end: "2026-08-31", renewal: "2026-08-24", adjustment: "Sem indice definido", owner: "Equipe docs", notes: "Risco por pendencia documental." }),
     ],
     renovacoes: [
       record({ name: "Renovar Hospital Norte", client: "MedSupply Brasil", contract: "Contrato 114/2025", value: 812000, stage: "Negociacao", status: "yellow", renewalDate: "2026-09-05", owner: "Rafael Lima", notes: "Aguardar validacao de reajuste e escopo." }),
@@ -493,8 +510,8 @@ function seedDb() {
       record({ name: "Renovacao de contrato", type: "Renovacao", subject: "Renovacao contratual - {{contrato}}", status: "yellow", updatedAt: "2026-08-08", body: "Vamos iniciar a tratativa de renovacao." }),
     ],
     empresas: [
-      record({ name: "Computeck Solucoes Inteligentes", region: "Nacional", portfolio: "Gestao B2G", manager: "Steven Passos", status: "green", notes: "Empresa proprietaria do produto." }),
-      record({ name: "Grupo Actcon", region: "Sudeste", portfolio: "Consultoria publica", manager: "Mariana Costa", status: "green", notes: "Carteira demonstrativa." }),
+      record({ name: "Computeck Solucoes Inteligentes", region: "Nacional", cnpj: "00.000.000/0001-00", email: "steven.passos@computeck.com.br", phone: "", address: "", city: "Governador Valadares/MG", logoUrl: "./assets/vendegov-crm-logo-horizontal.svg", portfolio: "Gestao B2G", manager: "Steven Passos", status: "green", notes: "Empresa proprietaria do produto." }),
+      record({ name: "Grupo Actcon", region: "Sudeste", cnpj: "", email: "steven.passos@computeck.com.br", phone: "", address: "", city: "Minas Gerais", logoUrl: "./assets/vendegov-crm-logo-horizontal.svg", portfolio: "Consultoria publica", manager: "Mariana Costa", status: "green", notes: "Carteira demonstrativa." }),
     ],
     regioes: [
       record({ name: "Sudeste", owner: "Mariana Costa", states: "SP, RJ, MG, ES", goal: 420000, status: "green", notes: "Maior carteira em receita recorrente." }),
@@ -664,6 +681,11 @@ function bindEvents() {
   el.modal.addEventListener("click", (event) => {
     if (event.target === el.modal) closeForm();
   });
+  el.closeLetterModal.addEventListener("click", closeLetterModal);
+  el.letterModal.addEventListener("click", (event) => {
+    if (event.target === el.letterModal) closeLetterModal();
+  });
+  el.letterModal.addEventListener("click", handleLetterModalClick);
   el.form.addEventListener("submit", submitForm);
   el.exportButton.addEventListener("click", exportDb);
   el.importButton.addEventListener("click", () => {
@@ -1045,9 +1067,12 @@ function renewalContractStatusPill(item) {
 }
 
 function renewalLetterAction(item) {
-  const label = item.letterDraft ? "Enviar" : "Gerar";
-  const action = item.letterDraft ? "data-renewal-email" : "data-renewal-generate";
-  return `<button class="letter-action" ${action}="${escapeAttr(item.id)}" type="button">Carta ${label}</button>`;
+  return `
+    <div class="letter-action-stack">
+      ${emailStatusBadge(item.emailStatus || (item.letterDraft ? "ready" : "pending"))}
+      ${renewalLetterManualActions(item)}
+    </div>
+  `;
 }
 
 function renewalAddendumBadge(item) {
@@ -1122,14 +1147,24 @@ function emailStatusBadge(status) {
 
 function renewalRowActions(item) {
   const emailAction = item.letterDraft
-    ? item.clientEmail
-      ? `<button class="mini-button" data-renewal-email="${escapeAttr(item.id)}" type="button">Enviar</button>`
-      : `<button class="mini-button" data-edit="${escapeAttr(item.id)}" data-module="renovacoes" type="button">Completar e-mail</button>`
-    : `<button class="mini-button" data-renewal-generate="${escapeAttr(item.id)}" type="button">Gerar carta</button>`;
+    ? `<button class="mini-button" data-letter-send="${escapeAttr(item.id)}" type="button">Enviar</button>`
+    : `<button class="mini-button" data-letter-generate="${escapeAttr(item.id)}" type="button">Gerar carta</button>`;
   const sentAction = item.letterDraft && item.emailStatus !== "sent"
-    ? `<button class="mini-button" data-renewal-mark-sent="${escapeAttr(item.id)}" type="button">Marcar enviada</button>`
+    ? `<button class="mini-button" data-letter-mark-sent="${escapeAttr(item.id)}" type="button">Marcar enviada</button>`
     : "";
-  return `<div class="row-actions"><button class="mini-button" data-open="${escapeAttr(item.id)}" data-module="renovacoes" type="button">Abrir</button>${emailAction}${sentAction}</div>`;
+  return `<div class="row-actions"><button class="mini-button" data-open="${escapeAttr(item.id)}" data-module="renovacoes" type="button">Abrir</button>${emailAction}<button class="mini-button" data-letter-view="${escapeAttr(item.id)}" type="button">Visualizar</button><button class="mini-button" data-letter-edit="${escapeAttr(item.id)}" type="button">Editar</button>${sentAction}</div>`;
+}
+
+function renewalLetterManualActions(item) {
+  const id = escapeAttr(item.id);
+  return `
+    <div class="letter-action-group">
+      <button class="letter-action" data-letter-generate="${id}" type="button">Gerar</button>
+      <button class="letter-action" data-letter-view="${id}" type="button">Ver</button>
+      <button class="letter-action" data-letter-edit="${id}" type="button">Editar</button>
+      <button class="letter-action" data-letter-send="${id}" type="button">Enviar</button>
+    </div>
+  `;
 }
 
 function renewalNotificationsTable(notifications) {
@@ -1376,6 +1411,7 @@ function syncContractRenewal(contract) {
     contract: contract.name,
     contractId: contract.id,
     value: Number(contract.monthly || 0),
+    responsibleCompany: existing.responsibleCompany || contract.responsibleCompany || "",
     legalRegime: assessment.regime,
     addendumType: "Prorrogacao de prazo",
     currentEnd: contract.end,
@@ -2317,6 +2353,11 @@ function bindDynamicActions() {
   document.querySelectorAll("[data-renewal-generate]").forEach((button) => button.addEventListener("click", () => generateStoredRenewalLetter(button.dataset.renewalGenerate)));
   document.querySelectorAll("[data-renewal-email]").forEach((button) => button.addEventListener("click", () => emailRenewalLetter(button.dataset.renewalEmail)));
   document.querySelectorAll("[data-renewal-mark-sent]").forEach((button) => button.addEventListener("click", () => markRenewalLetterSent(button.dataset.renewalMarkSent)));
+  document.querySelectorAll("[data-letter-generate]").forEach((button) => button.addEventListener("click", () => generateAndOpenRenewalLetter(button.dataset.letterGenerate, "preview")));
+  document.querySelectorAll("[data-letter-view]").forEach((button) => button.addEventListener("click", () => openRenewalLetterModal(button.dataset.letterView, "preview")));
+  document.querySelectorAll("[data-letter-edit]").forEach((button) => button.addEventListener("click", () => openRenewalLetterModal(button.dataset.letterEdit, "edit")));
+  document.querySelectorAll("[data-letter-send]").forEach((button) => button.addEventListener("click", () => openRenewalLetterModal(button.dataset.letterSend, "email")));
+  document.querySelectorAll("[data-letter-mark-sent]").forEach((button) => button.addEventListener("click", () => markRenewalLetterSent(button.dataset.letterMarkSent)));
   document.querySelectorAll("[data-renewal-result]").forEach((select) => select.addEventListener("change", () => updateRenewalResult(select.dataset.renewalResult, select.value)));
   document.querySelectorAll("[data-renewal-tab]").forEach((button) => button.addEventListener("click", () => {
     state.renewalTab = button.dataset.renewalTab;
@@ -2412,6 +2453,319 @@ function markRenewalLetterSent(id) {
   saveDb("Registrou envio de carta", renewal.contract || renewal.name || id);
   render();
   toast("Envio registrado na renovacao.");
+}
+
+async function generateAndOpenRenewalLetter(id, tab = "preview") {
+  const renewal = await ensureRenewalLetterDraft(id, true);
+  if (!renewal) return;
+  openRenewalLetterModal(id, tab);
+  toast(renewal.clientEmail ? "Carta gerada com timbre." : "Carta gerada. Complete o e-mail antes do envio.");
+}
+
+async function openRenewalLetterModal(id, tab = "preview") {
+  const renewal = await ensureRenewalLetterDraft(id, false);
+  if (!renewal) return;
+  state.letterRenewalId = id;
+  state.letterTab = tab;
+  renderLetterModal();
+  el.letterModal.classList.remove("hidden");
+}
+
+function closeLetterModal() {
+  state.letterRenewalId = "";
+  state.letterTab = "preview";
+  el.letterModal.classList.add("hidden");
+}
+
+async function ensureRenewalLetterDraft(id, force = false) {
+  const renewal = (db.renovacoes || []).find((item) => item.id === id);
+  if (!renewal) return null;
+  if (!renewal.letterDraft || force) {
+    await generateAutomaticRenewalLetter(renewal, { force: true });
+    saveDb("Gerou carta de renovacao", renewal.contract || renewal.name || id);
+    render();
+  }
+  return (db.renovacoes || []).find((item) => item.id === id) || renewal;
+}
+
+function handleLetterModalClick(event) {
+  const tabButton = event.target.closest("[data-letter-modal-tab]");
+  if (tabButton) {
+    state.letterTab = tabButton.dataset.letterModalTab;
+    renderLetterModal();
+    return;
+  }
+  if (event.target.closest("[data-letter-close]")) {
+    closeLetterModal();
+    return;
+  }
+  const saveButton = event.target.closest("[data-letter-save]");
+  if (saveButton) {
+    saveLetterDraftFromModal();
+    return;
+  }
+  const emailButton = event.target.closest("[data-letter-email-now]");
+  if (emailButton) {
+    emailRenewalLetter(emailButton.dataset.letterEmailNow);
+    renderLetterModal();
+    return;
+  }
+  const sentButton = event.target.closest("[data-letter-modal-sent]");
+  if (sentButton) {
+    markRenewalLetterSent(sentButton.dataset.letterModalSent);
+    state.letterRenewalId = sentButton.dataset.letterModalSent;
+    renderLetterModal();
+    return;
+  }
+  const unsentButton = event.target.closest("[data-letter-modal-unsent]");
+  if (unsentButton) {
+    markRenewalLetterNotSent(unsentButton.dataset.letterModalUnsent);
+    renderLetterModal();
+    return;
+  }
+  const printButton = event.target.closest("[data-letter-print]");
+  if (printButton) {
+    printRenewalLetter(printButton.dataset.letterPrint);
+  }
+}
+
+function renderLetterModal() {
+  const renewal = (db.renovacoes || []).find((item) => item.id === state.letterRenewalId);
+  if (!renewal) return;
+  const contract = findContractForRenewal(renewal) || {};
+  const company = responsibleCompanyForRenewal(renewal, contract);
+  const active = state.letterTab || "preview";
+  el.letterModalKicker.textContent = renewal.client || "Carta de renovacao";
+  el.letterModalTitle.textContent = `Carta de Renovacao - ${renewalContractNumber(renewal)}`;
+  el.letterModalTabs.innerHTML = [
+    ["preview", "Visualizar"],
+    ["edit", "Editar"],
+    ["email", "Enviar E-mail"],
+  ].map(([key, label]) => `<button class="${key === active ? "active" : ""}" data-letter-modal-tab="${key}" type="button">${label}</button>`).join("");
+  if (active === "edit") {
+    el.letterModalBody.innerHTML = renewalLetterEditHtml(renewal, company);
+    el.letterModalFooter.innerHTML = `
+      <button class="secondary-button" data-letter-close type="button">Fechar</button>
+      <button class="primary-button" data-letter-save type="button">Salvar Carta</button>
+    `;
+    return;
+  }
+  if (active === "email") {
+    el.letterModalBody.innerHTML = renewalLetterEmailHtml(renewal, company);
+    el.letterModalFooter.innerHTML = `
+      <button class="secondary-button" data-letter-modal-unsent="${escapeAttr(renewal.id)}" type="button">Marcar nao enviada</button>
+      <button class="secondary-button" data-letter-modal-sent="${escapeAttr(renewal.id)}" type="button">Marcar enviada</button>
+      <button class="primary-button" data-letter-email-now="${escapeAttr(renewal.id)}" type="button">Abrir E-mail</button>
+    `;
+    return;
+  }
+  el.letterModalBody.innerHTML = renewalLetterPreviewHtml(renewal, company);
+  el.letterModalFooter.innerHTML = `
+    <button class="secondary-button" data-letter-close type="button">Fechar</button>
+    <button class="primary-button" data-letter-print="${escapeAttr(renewal.id)}" type="button">Gerar PDF</button>
+  `;
+}
+
+function renewalLetterPreviewHtml(renewal, company) {
+  return `
+    <div class="letter-preview-shell">
+      ${letterDocumentHtml(renewal, company)}
+    </div>
+  `;
+}
+
+function renewalLetterEditHtml(renewal, company) {
+  return `
+    <div class="letter-editor-grid">
+      <section class="letter-config-card">
+        <h3>Timbre utilizado</h3>
+        <div class="letter-company-mini">
+          ${company.logoUrl ? `<img src="${escapeAttr(company.logoUrl)}" alt="">` : `<span>${escapeHtml(initials(company.name || "VG"))}</span>`}
+          <div>
+            <strong>${escapeHtml(company.name || "Empresa responsavel")}</strong>
+            <small>${escapeHtml(companyLine(company) || "Configure endereco, e-mail e CNPJ em Parametros > Empresas.")}</small>
+          </div>
+        </div>
+      </section>
+      <label class="letter-field">
+        Assunto
+        <input id="letterSubjectInput" value="${escapeAttr(renewal.letterSubject || renewalLetterSubject(findContractForRenewal(renewal) || {}, renewal))}" />
+      </label>
+      <label class="letter-field">
+        E-mail do cliente
+        <input id="letterClientEmailInput" type="email" value="${escapeAttr(renewal.clientEmail || "")}" />
+      </label>
+      <label class="letter-field">
+        Copia para consultor
+        <input id="letterConsultantEmailInput" type="email" value="${escapeAttr(renewal.consultantEmail || "")}" />
+      </label>
+      <label class="letter-field wide">
+        Texto da carta
+        <textarea id="letterDraftInput" rows="18">${escapeHtml(renewal.letterDraft || "")}</textarea>
+      </label>
+    </div>
+  `;
+}
+
+function renewalLetterEmailHtml(renewal, company) {
+  const blocked = !cleanImport(renewal.clientEmail);
+  return `
+    <div class="letter-email-grid">
+      <section class="letter-email-card ${blocked ? "blocked" : ""}">
+        <span>Status</span>
+        <strong>${emailStatusBadge(renewal.emailStatus || (renewal.letterDraft ? "ready" : "pending"))}</strong>
+        <p>${blocked ? "Inclua o e-mail do cliente antes de abrir o envio." : "O envio abre no e-mail do seu computador para revisao final."}</p>
+      </section>
+      <section class="letter-email-card">
+        <span>Destinatario</span>
+        <strong>${escapeHtml(renewal.clientEmail || "Nao informado")}</strong>
+        <p>Cliente: ${escapeHtml(renewal.client || "-")}</p>
+      </section>
+      <section class="letter-email-card">
+        <span>Copia</span>
+        <strong>${escapeHtml(renewal.consultantEmail || "Sem copia")}</strong>
+        <p>Consultor vinculado ao contrato.</p>
+      </section>
+      <section class="letter-email-card">
+        <span>Timbre</span>
+        <strong>${escapeHtml(company.name || "Empresa responsavel")}</strong>
+        <p>${escapeHtml(companyLine(company) || "Sem dados complementares.")}</p>
+      </section>
+      <section class="letter-email-card wide">
+        <span>Assunto</span>
+        <strong>${escapeHtml(renewal.letterSubject || renewalLetterSubject(findContractForRenewal(renewal) || {}, renewal))}</strong>
+      </section>
+    </div>
+  `;
+}
+
+function saveLetterDraftFromModal() {
+  const renewal = (db.renovacoes || []).find((item) => item.id === state.letterRenewalId);
+  if (!renewal) return;
+  renewal.letterSubject = document.querySelector("#letterSubjectInput")?.value.trim() || renewalLetterSubject(findContractForRenewal(renewal) || {}, renewal);
+  renewal.clientEmail = document.querySelector("#letterClientEmailInput")?.value.trim() || "";
+  renewal.consultantEmail = document.querySelector("#letterConsultantEmailInput")?.value.trim() || "";
+  renewal.letterDraft = document.querySelector("#letterDraftInput")?.value.trim() || "";
+  renewal.letterGeneratedAt = renewal.letterGeneratedAt || today();
+  renewal.emailStatus = renewal.clientEmail ? "ready" : "blocked";
+  renewal.updatedAt = now();
+  saveDb("Editou carta de renovacao", renewal.contract || renewal.name || renewal.id);
+  render();
+  state.letterRenewalId = renewal.id;
+  state.letterTab = "preview";
+  renderLetterModal();
+  toast("Carta salva.");
+}
+
+function markRenewalLetterNotSent(id) {
+  const renewal = (db.renovacoes || []).find((item) => item.id === id);
+  if (!renewal) return;
+  renewal.emailStatus = renewal.clientEmail ? (renewal.letterDraft ? "ready" : "pending") : "blocked";
+  renewal.letterSentAt = "";
+  renewal.updatedAt = now();
+  saveDb("Marcou carta como nao enviada", renewal.contract || renewal.name || id);
+  render();
+  state.letterRenewalId = id;
+  toast("Carta marcada como nao enviada.");
+}
+
+function printRenewalLetter(id) {
+  const renewal = (db.renovacoes || []).find((item) => item.id === id);
+  if (!renewal) return;
+  const company = responsibleCompanyForRenewal(renewal, findContractForRenewal(renewal) || {});
+  const html = `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>${escapeHtml(renewal.letterSubject || "Carta de renovacao")}</title><style>${letterPrintCss()}</style></head><body>${letterDocumentHtml(renewal, company)}</body></html>`;
+  const popup = window.open("", "_blank");
+  if (!popup) {
+    toast("Permita pop-ups para gerar PDF.");
+    return;
+  }
+  popup.document.open();
+  popup.document.write(html);
+  popup.document.close();
+  popup.focus();
+  setTimeout(() => popup.print(), 300);
+}
+
+function letterDocumentHtml(renewal, company) {
+  const body = letterBodyWithoutSubject(renewal.letterDraft || renewalLetterTemplate(findContractForRenewal(renewal) || {}, renewal));
+  const paragraphs = body
+    .split(/\n{2,}/)
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean)
+    .map((paragraph) => `<p>${escapeHtml(paragraph).replace(/\n/g, "<br>")}</p>`)
+    .join("");
+  return `
+    <article class="letter-paper">
+      <header class="letterhead">
+        ${company.logoUrl ? `<img src="${escapeAttr(company.logoUrl)}" alt="${escapeAttr(company.name || "Logo")}">` : `<div class="letter-logo-fallback">${escapeHtml(initials(company.name || "VG"))}</div>`}
+        <h3>${escapeHtml(company.name || "Empresa responsavel")}</h3>
+        ${companyLine(company) ? `<p>${escapeHtml(companyLine(company))}</p>` : ""}
+        ${companyContactLine(company) ? `<p>${escapeHtml(companyContactLine(company))}</p>` : ""}
+        ${company.cnpj ? `<p>CNPJ: ${escapeHtml(company.cnpj)}</p>` : ""}
+      </header>
+      <div class="letter-reference">
+        <p>${escapeHtml(company.city || "Brasil")}, ${longDate(today())}.</p>
+        <p><strong>Ref.:</strong> ${escapeHtml(renewal.letterSubject || renewalLetterSubject(findContractForRenewal(renewal) || {}, renewal))}</p>
+      </div>
+      <section class="letter-body">${paragraphs}</section>
+    </article>
+  `;
+}
+
+function letterBodyWithoutSubject(text) {
+  return cleanImport(text).replace(/^Assunto:\s*.+(\n+)?/i, "").trim();
+}
+
+function responsibleCompanyForRenewal(renewal = {}, contract = {}) {
+  const candidates = [
+    renewal.responsibleCompany,
+    contract.responsibleCompany,
+    renewal.company,
+    contract.company,
+    renewal.ownerCompany,
+    contract.ownerCompany,
+  ].map(cleanImport).filter(Boolean);
+  const companies = db.empresas || [];
+  const exact = companies.find((company) => candidates.some((candidate) => sameText(company.id, candidate) || sameText(company.name, candidate) || sameText(company.portfolio, candidate)));
+  const active = companies.find((company) => company.status === "green") || companies[0];
+  return {
+    name: "Computeck Solucoes Inteligentes",
+    logoUrl: "./assets/vendegov-crm-logo-horizontal.svg",
+    email: "steven.passos@computeck.com.br",
+    city: "Governador Valadares/MG",
+    ...(active || {}),
+    ...(exact || {}),
+  };
+}
+
+function companyLine(company = {}) {
+  return [company.address, company.city].map(cleanImport).filter(Boolean).join(" - ");
+}
+
+function companyContactLine(company = {}) {
+  return [company.phone, company.email].map(cleanImport).filter(Boolean).join(" | ");
+}
+
+function longDate(value) {
+  const parsed = parseDate(value);
+  if (!parsed) return date(value);
+  return parsed.toLocaleDateString("pt-BR", { day: "numeric", month: "long", year: "numeric" });
+}
+
+function letterPrintCss() {
+  return `
+    body { margin: 0; background: #fff; color: #08172b; font: 14px/1.6 Arial, sans-serif; }
+    .letter-paper { width: 190mm; min-height: 267mm; margin: 0 auto; padding: 18mm; box-sizing: border-box; }
+    .letterhead { text-align: center; border-bottom: 1px solid #d8e1eb; padding-bottom: 14px; margin-bottom: 28px; }
+    .letterhead img { max-width: 160px; max-height: 72px; object-fit: contain; margin-bottom: 12px; }
+    .letterhead h3 { margin: 0 0 6px; font-size: 18px; }
+    .letterhead p { margin: 2px 0; color: #30445d; }
+    .letter-reference { margin-bottom: 22px; }
+    .letter-reference p { margin: 0 0 16px; }
+    .letter-body p { margin: 0 0 14px; text-align: justify; }
+    .letter-logo-fallback { display: inline-grid; place-items: center; width: 68px; height: 68px; border-radius: 14px; background: #102139; color: #fff; font-weight: 800; margin-bottom: 12px; }
+    @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+  `;
 }
 
 function updateRenewalResult(id, result) {
@@ -2925,6 +3279,7 @@ function contractFromCsvRow(row) {
   const name = addendum ? `Contrato ${number || sourceId} - ${addendum}` : `Contrato ${number || sourceId}`;
   const percent = cleanImport(row.percentual_reajuste);
   const adjustment = [cleanImport(row.indice_reajuste), percent ? `${percent}%` : ""].filter(Boolean).join(" ");
+  const responsibleCompany = cleanImport(row.empresa_responsavel || row.empresa_responsavel_id || row.empresa_interna || row.contratada || row.fornecedor || row.company);
   return {
     id: sourceId || uid(),
     sourceId,
@@ -2933,6 +3288,7 @@ function contractFromCsvRow(row) {
     name,
     client: client || "Cliente nao informado",
     agency,
+    responsibleCompany,
     object: cleanImport(row.objeto),
     legalBasis: cleanImport(row.fundamento_legal),
     legalRegime: cleanImport(row.regime_legal),
