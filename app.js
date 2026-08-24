@@ -379,6 +379,7 @@ const state = {
   deleteTarget: null,
   clientDetailId: "",
   clientTab: "contratos",
+  dashboardNotificationsOpen: false,
   aiBusy: "",
   aiFocus: "",
   aiContractId: "",
@@ -736,7 +737,7 @@ function render() {
 }
 
 function viewMeta(view) {
-  if (view === "dashboard") return { title: "Painel executivo", kicker: "Visao geral" };
+  if (view === "dashboard") return { title: "Visao Geral", kicker: "Contratos e renovacoes" };
   if (view === "cliente") return { title: "Ficha do cliente", kicker: "Carteira" };
   if (view === "ia") return { title: "IA Gemini", kicker: "Automacao operacional" };
   if (view === "renovacoes") return { title: "Renovacoes de Contratos", kicker: "Acompanhamento" };
@@ -746,55 +747,539 @@ function viewMeta(view) {
 }
 
 function renderDashboard() {
-  const monthly = sum(db.contratos || [], "monthly");
-  const adjustments = money(sum((db.financeiro || []).filter((item) => item.type === "Reajuste"), "value"));
-  const activeContracts = (db.contratos || []).filter((item) => item.status === "green" || item.status === "cyan").length;
-  const openBids = (db.licitacoes || []).filter((item) => item.stage !== "Contrato" && item.status !== "red").length;
-  const alerts = [...(db.documentos || []), ...(db.contratos || []), ...(db.renovacoes || []), ...(db.comissoes || [])].filter((item) => item.status === "yellow" || item.status === "red").length;
-  const commissionsOpen = sum((db.comissoes || []).filter((item) => item.status !== "green"), "value");
+  const data = dashboardOverviewData();
   el.content.innerHTML = `
-    <div class="metric-grid">
-      ${metric("Receita mensal", money(monthly), `+ ${adjustments} em reajustes`)}
-      ${metric("Contratos ativos", activeContracts, "base monitorada")}
-      ${metric("Licitacoes abertas", openBids, "em execucao comercial")}
-      ${metric("Alertas", alerts, `${money(commissionsOpen)} em comissoes abertas`)}
-    </div>
-    <div class="grid-2">
-      <section class="panel">
-        <div class="panel-header">
-          <div><h2>Pipeline B2G</h2><p>Visao por etapa das licitacoes e propostas ativas.</p></div>
-          <button class="secondary-button" data-jump="licitacoes" type="button">Abrir licitacoes</button>
+    <section class="overview-dashboard">
+      <div class="overview-head">
+        <div>
+          <h2>Visao Geral</h2>
+          <p>Visao geral dos seus contratos e renovacoes</p>
         </div>
-        <div class="kanban">${renderKanban()}</div>
-      </section>
-      <section class="panel">
-        <div class="panel-header">
-          <div><h2>IA operacional</h2><p>Automacoes operacionais para apoiar a rotina comercial.</p></div>
-        </div>
-        <div class="ai-grid">
-          ${aiButton("ED", "Analisar edital", "Extrai objeto, documentos, prazos e riscos.")}
-          ${aiButton("DC", "Preparar documentos", "Monta checklist de habilitacao e pendencias.")}
-          ${aiButton("PR", "Gerar proposta", "Cria proposta tecnica e comercial a partir de templates.")}
-          ${aiButton("CT", "Analisar contrato", "Identifica vencimento, reajuste e obrigacoes.")}
-          ${aiButton("DG", "Diagnostico digital", "Mostra maturidade, riscos e proximas acoes.")}
-          ${aiButton("RV", "Relatorio de viagem", "Gera resumo de visita, custos e encaminhamentos.")}
-        </div>
-      </section>
-    </div>
-    <section class="table-panel">
-      <div class="table-toolbar">
-        <div><h2>Proximas acoes</h2><p>Prioridades calculadas por status e prazo.</p></div>
-        <div class="toolbar-controls"><button class="primary-button" data-add="agenda" type="button">Agendar acao</button></div>
+        ${dashboardNotificationBell(data.notifications)}
       </div>
-      ${simpleTable(["Acao", "Cliente", "Modulo", "Prazo", "Status", "Acoes"], upcomingRows())}
+      <div class="overview-kpis">
+        ${overviewKpi("Contratos ativos", data.activeContracts, `de ${data.totalContracts} total`, "DOC")}
+        ${overviewKpi("Empresas", data.companies, "cadastradas", "EMP")}
+        ${overviewKpi("Proximos a vencer", data.upcomingContracts.length, "nos proximos 90 dias", "90", "attention")}
+        ${overviewKpi("Valor mensal total", compactMoney(data.monthlyTotal), `${compactMoney(data.monthlyTotal * 12)}/ano`, "MRR")}
+      </div>
+      ${dashboardDeadlineAlert(data.expiredContracts.length, data.upcomingContracts.length)}
+      <h3 class="overview-section-title">Desempenho</h3>
+      <div class="overview-performance">
+        <section class="overview-card ticket-card">
+          <div class="overview-card-head">
+            <div><span>Ticket medio</span><strong>${moneyCents(data.averageTicket)}</strong><small>por contrato ativo / mes</small></div>
+            <b>R$</b>
+          </div>
+          <p class="${data.ticketDelta >= 0 ? "positive" : "negative"}">${data.ticketDelta >= 0 ? "↑" : "↓"} ${Math.abs(data.ticketDelta).toFixed(1)}% vs mes anterior</p>
+          ${sparklineChart(data.ticketSeries)}
+        </section>
+        <section class="overview-card mrr-card">
+          <div class="overview-card-title"><h3>Novo MRR por mes</h3><p>Receita recorrente de novos contratos nos ultimos 12 meses</p></div>
+          ${lineAreaChart(data.months, data.newMrrSeries, { money: true })}
+        </section>
+      </div>
+      <div class="overview-grid-2">
+        <section class="overview-card">
+          <div class="overview-card-title"><h3>Clientes novos (12 meses)</h3><p>Orgaos unicos contratados por mes</p></div>
+          ${barChart(data.months, data.newClientsSeries)}
+        </section>
+        <section class="overview-card">
+          <div class="overview-card-title"><h3>Reajustes aplicados (12 meses)</h3><p>Valor anterior vs. valor reajustado por mes</p></div>
+          ${groupedBarChart(data.months, data.adjustmentBeforeSeries, data.adjustmentAfterSeries)}
+        </section>
+        <section class="overview-card">
+          <div class="overview-card-title"><h3>Proximos vencimentos</h3></div>
+          ${dashboardDueList(data.dueContracts)}
+        </section>
+        <section class="overview-card">
+          <div class="overview-card-title"><h3>Valor por regiao</h3></div>
+          ${horizontalBarChart(data.regionValues, { money: true })}
+        </section>
+        <section class="overview-card">
+          <div class="overview-card-title"><h3>Valor por tipo de orgao</h3></div>
+        ${donutChart(data.typeValues)}
+      </section>
+        <section class="overview-card">
+          <div class="overview-card-title"><h3>Contratos por tipo de orgao</h3></div>
+          ${dashboardTypeList(data.typeCounts)}
+        </section>
+      </div>
+      <section class="overview-card renewal-goal-card">
+        <div class="overview-card-title"><h3>Meta de Renovacao &mdash; ${monthTitle(today())}</h3>${dashboardGoalText(data.goal)}</div>
+        <button class="link-action" data-dashboard-goal type="button">Definir meta</button>
+      </section>
+      <section class="overview-card latest-letters-card">
+        <div class="overview-card-title"><h3>Ultimas cartas geradas</h3></div>
+        ${dashboardLatestLetters(data.latestLetters)}
+      </section>
     </section>
-    <div class="module-grid">
-      ${moduleCard("MKT", "Marketing", "Campanhas, listas e leads para alimentar o comercial.")}
-      ${moduleCard("REN", "Renovacoes", "Tratativas de renovacao e reajuste antes do vencimento.")}
-      ${moduleCard("COM", "Comissoes", "Controle de pagamento, previsao e atraso por vendedor.")}
-    </div>
   `;
   bindDynamicActions();
+}
+
+function dashboardOverviewData() {
+  const contracts = db.contratos || [];
+  const activeRows = contracts.filter(dashboardContractIsActive);
+  const expiredContracts = contracts.filter((contract) => {
+    const days = contractDueDays(contract);
+    return Number.isFinite(days) && days < 0;
+  });
+  const upcomingContracts = contracts
+    .filter((contract) => {
+      const days = contractDueDays(contract);
+      return Number.isFinite(days) && days >= 0 && days <= 90;
+    })
+    .sort((a, b) => contractDueDays(a) - contractDueDays(b));
+  const dueContracts = contracts
+    .filter((contract) => Number.isFinite(contractDueDays(contract)))
+    .sort((a, b) => contractDueDays(a) - contractDueDays(b))
+    .slice(0, 5);
+  const monthlyTotal = activeRows.reduce((total, contract) => total + dashboardContractMonthly(contract), 0);
+  const averageTicket = activeRows.length ? monthlyTotal / activeRows.length : 0;
+  const months = lastTwelveMonths();
+  const ticketSeries = months.map((month) => dashboardTicketAtMonth(contracts, month.key));
+  const previousTicket = ticketSeries.length > 1 ? ticketSeries[ticketSeries.length - 2] : averageTicket;
+  const ticketDelta = previousTicket ? ((averageTicket - previousTicket) / previousTicket) * 100 : 0;
+  return {
+    totalContracts: contracts.length,
+    activeContracts: activeRows.length,
+    expiredContracts,
+    upcomingContracts,
+    dueContracts,
+    companies: (db.empresas || []).length,
+    monthlyTotal,
+    averageTicket,
+    ticketDelta,
+    ticketSeries,
+    months,
+    newMrrSeries: months.map((month) => monthlyNewMrr(contracts, month.key)),
+    newClientsSeries: months.map((month) => monthlyNewClients(contracts, month.key)),
+    adjustmentBeforeSeries: months.map((month) => monthlyAdjustmentValue(contracts, month.key, "before")),
+    adjustmentAfterSeries: months.map((month) => monthlyAdjustmentValue(contracts, month.key, "after")),
+    regionValues: groupedContractValues(contracts, dashboardContractRegion),
+    typeValues: groupedContractValues(contracts, dashboardContractType),
+    typeCounts: groupedContractCounts(contracts, dashboardContractType),
+    notifications: dashboardNotifications(upcomingContracts),
+    latestLetters: dashboardLatestLetterRows(),
+    goal: dashboardRenewalGoal(),
+  };
+}
+
+function overviewKpi(label, value, hint, icon, tone = "") {
+  return `
+    <article class="overview-kpi ${tone}">
+      <div><span>${escapeHtml(label)}</span><strong>${escapeHtml(String(value))}</strong><small>${escapeHtml(hint)}</small></div>
+      <b>${escapeHtml(icon)}</b>
+    </article>
+  `;
+}
+
+function dashboardNotificationBell(notifications) {
+  const count = notifications.length;
+  return `
+    <div class="notification-wrap">
+      <button class="notification-bell" data-dashboard-notifications type="button" aria-label="Notificacoes">
+        <span>AL</span>${count ? `<b>${count > 99 ? "99+" : count}</b>` : ""}
+      </button>
+      ${state.dashboardNotificationsOpen ? dashboardNotificationMenu(notifications) : ""}
+    </div>
+  `;
+}
+
+function dashboardNotificationMenu(notifications) {
+  const rows = notifications.slice(0, 5).map((item) => `
+    <button class="notification-row" data-open="${escapeAttr(item.id)}" data-module="contratos" type="button">
+      <span><strong>${escapeHtml(shortText(item.client || item.agency || item.name, 34))}</strong><small>${date(dashboardContractEnd(item))}</small></span>
+      <em>${daysLabel(contractDueDays(item))}</em>
+      <i>&gt;</i>
+    </button>
+  `).join("");
+  return `
+    <div class="notification-menu">
+      <header><strong>Notificacoes</strong><span>${notifications.length} no total</span></header>
+      <p>Vencimento de Contratos <b>(${notifications.length})</b></p>
+      ${rows || `<div class="notification-empty">Nenhum contrato vencendo nos proximos 90 dias.</div>`}
+    </div>
+  `;
+}
+
+function dashboardDeadlineAlert(expired, upcoming) {
+  const critical = expired || upcoming;
+  if (!critical) {
+    return `<div class="overview-alert is-ok"><strong>Prazos em dia.</strong><span>Nenhum contrato vencido ou vencendo nos proximos 90 dias.</span></div>`;
+  }
+  return `
+    <div class="overview-alert">
+      <strong>Atencao aos prazos!</strong>
+      <span>${expired} contrato(s) vencido(s). ${upcoming} contrato(s) vencem nos proximos 90 dias.</span>
+    </div>
+  `;
+}
+
+function dashboardDueList(rows) {
+  if (!rows.length) return `<div class="empty-state">Nenhum vencimento encontrado.</div>`;
+  return `<div class="due-list">${rows.map((contract) => {
+    const days = contractDueDays(contract);
+    const isLate = days < 0;
+    return `
+      <button class="due-list-row" data-open="${escapeAttr(contract.id)}" data-module="contratos" type="button">
+        <b>!</b>
+        <span><strong>${escapeHtml(renewalContractNumber({ contract: contract.name }) || contract.name || "-")}</strong><small>${escapeHtml(contract.client || contract.agency || "-")}</small></span>
+        <em class="${isLate ? "late" : ""}">${isLate ? "Vencido" : daysLabel(days)}</em>
+        <small>${date(dashboardContractEnd(contract))}</small>
+      </button>
+    `;
+  }).join("")}</div>`;
+}
+
+function dashboardTypeList(entries) {
+  if (!entries.length) return `<div class="empty-state">Nenhum tipo de orgao informado.</div>`;
+  return `<div class="type-list">${entries.slice(0, 7).map(([label, count]) => `
+    <div><strong>${escapeHtml(label)}</strong><span>${count} contrato(s)</span></div>
+  `).join("")}</div>`;
+}
+
+function dashboardLatestLetters(rows) {
+  if (!rows.length) return `<div class="empty-state">Nenhuma carta gerada ainda.</div>`;
+  return `<div class="latest-letter-list">${rows.map((item) => `
+    <button class="latest-letter-row" data-letter-view="${escapeAttr(item.id)}" type="button">
+      <span><strong>${escapeHtml(renewalContractNumber(item) || item.contract || item.name || "-")}</strong><small>${escapeHtml(item.adjustmentLabel)} &bull; ${escapeHtml(item.statusLabel)}</small></span>
+      <span><strong>${moneyCents(item.value || 0)}</strong><small>${date(item.date)}</small></span>
+    </button>
+  `).join("")}</div>`;
+}
+
+function dashboardGoalText(goal) {
+  if (!goal) return `<p>Nenhuma meta definida para este mes.</p>`;
+  return `<p><strong>${escapeHtml(goal.value || goal.name)}</strong>${goal.notes ? ` ${escapeHtml(goal.notes)}` : ""}</p>`;
+}
+
+function dashboardContractIsActive(contract) {
+  const days = contractDueDays(contract);
+  if (Number.isFinite(days)) return days >= 0 && contract.status !== "red";
+  return contract.status === "green" || contract.status === "cyan" || contract.status === "yellow";
+}
+
+function dashboardContractMonthly(contract) {
+  const monthly = Number(contract.monthly || 0);
+  if (monthly) return monthly;
+  const value = Number(contract.value || 0);
+  const months = monthsBetween(contract.start, contract.end);
+  return months ? value / months : value;
+}
+
+function dashboardContractEnd(contract) {
+  return contract.end || contract.currentEnd || contract.renewal || contract.renewalDate || "";
+}
+
+function contractDueDays(contract) {
+  const end = dashboardContractEnd(contract);
+  return parseDate(end) ? daysUntil(end) : Number.POSITIVE_INFINITY;
+}
+
+function dashboardTicketAtMonth(contracts, monthKey) {
+  const active = contracts.filter((contract) => contractActiveInMonth(contract, monthKey));
+  const total = active.reduce((sumValue, contract) => sumValue + dashboardContractMonthly(contract), 0);
+  return active.length ? total / active.length : 0;
+}
+
+function contractActiveInMonth(contract, monthKey) {
+  const bounds = monthBounds(monthKey);
+  const start = parseDate(contract.start) || parseDate(contract.createdAt) || new Date(0);
+  const end = parseDate(dashboardContractEnd(contract)) || new Date(8640000000000000);
+  return start <= bounds.end && end >= bounds.start;
+}
+
+function monthlyNewMrr(contracts, monthKey) {
+  return contracts
+    .filter((contract) => monthKeyFromValue(contract.start || contract.createdAt) === monthKey)
+    .reduce((total, contract) => total + dashboardContractMonthly(contract), 0);
+}
+
+function monthlyNewClients(contracts, monthKey) {
+  const names = new Set();
+  contracts.forEach((contract) => {
+    if (monthKeyFromValue(contract.start || contract.createdAt) !== monthKey) return;
+    const name = normalizeText(contract.client || contract.agency || contract.name);
+    if (name) names.add(name);
+  });
+  return names.size;
+}
+
+function monthlyAdjustmentValue(contracts, monthKey, mode) {
+  return contracts
+    .filter((contract) => monthKeyFromValue(contract.renewal || contract.updatedAt || contract.start) === monthKey)
+    .filter((contract) => cleanImport(contract.adjustment) || /reajuste/i.test(cleanImport(contract.notes)))
+    .reduce((total, contract) => {
+      const adjusted = dashboardContractMonthly(contract);
+      const percent = adjustmentPercent(contract);
+      const previous = percent ? adjusted / (1 + percent / 100) : adjusted;
+      return total + (mode === "before" ? previous : adjusted);
+    }, 0);
+}
+
+function adjustmentPercent(contract) {
+  const match = cleanImport(`${contract.adjustment || ""} ${contract.notes || ""}`).match(/(\d+(?:[,.]\d+)?)\s*%/);
+  return match ? Number(match[1].replace(",", ".")) : 0;
+}
+
+function groupedContractValues(contracts, labeler) {
+  const map = new Map();
+  contracts.forEach((contract) => {
+    const label = labeler(contract);
+    map.set(label, (map.get(label) || 0) + dashboardContractMonthly(contract));
+  });
+  return [...map.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8);
+}
+
+function groupedContractCounts(contracts, labeler) {
+  const map = new Map();
+  contracts.forEach((contract) => {
+    const label = labeler(contract);
+    map.set(label, (map.get(label) || 0) + 1);
+  });
+  return [...map.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8);
+}
+
+function dashboardContractRegion(contract) {
+  return cleanImport(contract.region) || "Nao informada";
+}
+
+function dashboardContractType(contract) {
+  const explicit = cleanImport(contract.agencyType);
+  if (explicit) return titleCaseText(explicit);
+  const text = normalizeText(`${contract.agency || ""} ${contract.client || ""}`);
+  if (text.includes("prefeitura") || text.includes("municipio") || text.includes("municipal")) return "Prefeitura";
+  if (text.includes("camara")) return "Camara";
+  if (text.includes("autarquia")) return "Autarquia";
+  if (text.includes("instituto")) return "Instituto";
+  if (text.includes("fundacao")) return "Fundacao";
+  if (text.includes("consorcio")) return "Consorcio";
+  return "Nao informado";
+}
+
+function dashboardNotifications(upcomingContracts) {
+  return upcomingContracts.slice(0, 8);
+}
+
+function dashboardLatestLetterRows() {
+  return (db.renovacoes || [])
+    .filter((item) => item.letterDraft || item.letterGeneratedAt || item.emailStatus === "sent")
+    .map((item) => ({
+      ...item,
+      date: item.letterSentAt || item.letterGeneratedAt || item.updatedAt || item.createdAt,
+      adjustmentLabel: /reajuste/i.test(`${item.addendumType || ""} ${item.notes || ""}`) ? "Com reajuste" : "Sem reajuste",
+      statusLabel: item.emailStatus === "sent" ? "Enviada" : item.stage === "Renovada" ? "Aceita" : "Rascunho",
+    }))
+    .sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")))
+    .slice(0, 5);
+}
+
+function dashboardRenewalGoal() {
+  const month = normalizeText(monthTitle(today()));
+  return (db.sistema || []).find((item) => {
+    const name = normalizeText(item.name);
+    return name.includes("meta") && name.includes("renovacao") && (name.includes(month) || item.updatedAt?.slice(0, 7) === today().slice(0, 7));
+  }) || null;
+}
+
+function openDashboardGoalForm() {
+  openForm("sistema", null, {
+    name: `Meta de Renovacao - ${monthTitle(today())}`,
+    area: "Carteira",
+    value: "",
+    status: "cyan",
+    updatedAt: today(),
+    notes: "Informe a meta mensal de renovacao.",
+  });
+}
+
+function sparklineChart(series) {
+  const values = series.some((value) => value > 0) ? series : [8, 7, 7, 9, 8, 7, 4, 7, 6, 8, 7, 7];
+  const width = 330;
+  const height = 92;
+  const points = linePoints(values, width, height, 8);
+  return `<svg class="sparkline" viewBox="0 0 ${width} ${height}" role="img" aria-label="Ticket medio por mes"><polyline points="${points}" fill="none" stroke="#4b50ff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+}
+
+function lineAreaChart(months, series, options = {}) {
+  const width = 780;
+  const height = 300;
+  const pad = { left: 72, right: 28, top: 20, bottom: 42 };
+  const max = niceMax(series);
+  const points = series.map((value, index) => {
+    const x = pad.left + (index * (width - pad.left - pad.right)) / Math.max(1, series.length - 1);
+    const y = pad.top + (1 - Number(value || 0) / max) * (height - pad.top - pad.bottom);
+    return [x, y];
+  });
+  const line = points.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(" ");
+  const area = `${pad.left},${height - pad.bottom} ${line} ${width - pad.right},${height - pad.bottom}`;
+  const grid = [0, 0.25, 0.5, 0.75, 1].map((step) => {
+    const y = pad.top + (1 - step) * (height - pad.top - pad.bottom);
+    const label = options.money ? compactMoney(max * step) : String(Math.round(max * step));
+    return `<g><line x1="${pad.left}" x2="${width - pad.right}" y1="${y}" y2="${y}" /><text x="${pad.left - 10}" y="${y + 4}">${escapeHtml(label)}</text></g>`;
+  }).join("");
+  const dots = points.map(([x, y]) => `<circle cx="${x}" cy="${y}" r="4" />`).join("");
+  const labels = months.map((month, index) => {
+    const x = pad.left + (index * (width - pad.left - pad.right)) / Math.max(1, months.length - 1);
+    return `<text x="${x}" y="${height - 12}" text-anchor="middle">${month.label}</text>`;
+  }).join("");
+  return `<svg class="line-chart" viewBox="0 0 ${width} ${height}" role="img"><g class="chart-grid">${grid}</g><polygon class="line-area" points="${area}"/><polyline class="line-stroke" points="${line}"/>${dots}<g class="chart-labels">${labels}</g></svg>`;
+}
+
+function barChart(months, series) {
+  const width = 640;
+  const height = 300;
+  const pad = { left: 36, right: 18, top: 22, bottom: 42 };
+  const max = niceMax(series);
+  const chartHeight = height - pad.top - pad.bottom;
+  const slot = (width - pad.left - pad.right) / months.length;
+  const bars = series.map((value, index) => {
+    const barHeight = (Number(value || 0) / max) * chartHeight;
+    const x = pad.left + index * slot + slot * 0.18;
+    const y = pad.top + chartHeight - barHeight;
+    const tone = index >= months.length - 2 ? "strong" : index >= months.length - 6 ? "mid" : "light";
+    return `<rect class="${tone}" x="${x}" y="${y}" width="${slot * 0.64}" height="${barHeight}" rx="6"/>`;
+  }).join("");
+  return `<svg class="bar-chart" viewBox="0 0 ${width} ${height}" role="img">${chartAxis(width, height, pad, max, false)}${bars}${chartMonthLabels(months, width, height, pad)}</svg>`;
+}
+
+function groupedBarChart(months, beforeSeries, afterSeries) {
+  const width = 640;
+  const height = 300;
+  const pad = { left: 70, right: 18, top: 22, bottom: 52 };
+  const max = niceMax([...beforeSeries, ...afterSeries]);
+  const chartHeight = height - pad.top - pad.bottom;
+  const slot = (width - pad.left - pad.right) / months.length;
+  const bars = months.map((month, index) => {
+    const before = beforeSeries[index] || 0;
+    const after = afterSeries[index] || 0;
+    const beforeHeight = (before / max) * chartHeight;
+    const afterHeight = (after / max) * chartHeight;
+    const x = pad.left + index * slot + slot * 0.18;
+    return `
+      <rect class="before" x="${x}" y="${pad.top + chartHeight - beforeHeight}" width="${slot * 0.28}" height="${beforeHeight}" rx="4"/>
+      <rect class="after" x="${x + slot * 0.34}" y="${pad.top + chartHeight - afterHeight}" width="${slot * 0.28}" height="${afterHeight}" rx="4"/>
+    `;
+  }).join("");
+  return `<svg class="grouped-bar-chart" viewBox="0 0 ${width} ${height}" role="img">${chartAxis(width, height, pad, max, true)}${bars}${chartMonthLabels(months, width, height, pad)}<g class="chart-legend"><circle cx="248" cy="284" r="7" class="before-dot"/><text x="260" y="288">Valor Anterior</text><circle cx="370" cy="284" r="7" class="after-dot"/><text x="382" y="288">Valor Reajustado</text></g></svg>`;
+}
+
+function horizontalBarChart(entries, options = {}) {
+  if (!entries.length) return `<div class="empty-state">Nenhum valor por regiao.</div>`;
+  const max = Math.max(...entries.map((entry) => entry[1]), 1);
+  return `<div class="hbar-chart">${entries.slice(0, 6).map(([label, value], index) => `
+    <div class="hbar-row">
+      <span>${escapeHtml(label)}</span>
+      <b style="width:${Math.max(5, (value / max) * 100)}%" class="tone-${index}"></b>
+      <em>${options.money ? compactMoney(value) : value}</em>
+    </div>
+  `).join("")}</div>`;
+}
+
+function donutChart(entries) {
+  if (!entries.length) return `<div class="empty-state">Nenhum valor por tipo de orgao.</div>`;
+  const total = entries.reduce((sumValue, [, value]) => sumValue + value, 0) || 1;
+  const radius = 58;
+  const circumference = 2 * Math.PI * radius;
+  let offset = 0;
+  const colors = ["#2443bf", "#3d83f1", "#72b8ff", "#b8dafd", "#dcecff", "#0f9b70"];
+  const slices = entries.slice(0, 6).map(([label, value], index) => {
+    const length = (value / total) * circumference;
+    const circle = `<circle r="${radius}" cx="90" cy="90" stroke="${colors[index % colors.length]}" stroke-width="28" fill="none" stroke-dasharray="${length} ${circumference - length}" stroke-dashoffset="${-offset}" transform="rotate(-90 90 90)"/>`;
+    offset += length;
+    return circle;
+  }).join("");
+  const legend = entries.slice(0, 6).map(([label, value], index) => `<li><i style="background:${colors[index % colors.length]}"></i><span>${escapeHtml(label)} (${Math.round((value / total) * 100)}%)</span></li>`).join("");
+  return `<div class="donut-wrap"><svg viewBox="0 0 180 180" role="img"><circle r="${radius}" cx="90" cy="90" stroke="#eef3f8" stroke-width="28" fill="none"/>${slices}<circle r="36" cx="90" cy="90" fill="#ffffff"/></svg><ul>${legend}</ul></div>`;
+}
+
+function chartAxis(width, height, pad, max, moneyAxis) {
+  return [0, 0.25, 0.5, 0.75, 1].map((step) => {
+    const y = pad.top + (1 - step) * (height - pad.top - pad.bottom);
+    const label = moneyAxis ? compactMoney(max * step) : String(Math.round(max * step));
+    return `<g class="chart-grid"><line x1="${pad.left}" x2="${width - pad.right}" y1="${y}" y2="${y}" /><text x="${pad.left - 10}" y="${y + 4}">${escapeHtml(label)}</text></g>`;
+  }).join("");
+}
+
+function chartMonthLabels(months, width, height, pad) {
+  const slot = (width - pad.left - pad.right) / months.length;
+  return `<g class="chart-labels">${months.map((month, index) => `<text x="${pad.left + index * slot + slot / 2}" y="${height - 14}" text-anchor="middle">${month.label}</text>`).join("")}</g>`;
+}
+
+function linePoints(values, width, height, pad) {
+  const max = Math.max(...values, 1);
+  const min = Math.min(...values, 0);
+  const range = Math.max(max - min, 1);
+  return values.map((value, index) => {
+    const x = pad + (index * (width - pad * 2)) / Math.max(1, values.length - 1);
+    const y = pad + (1 - (value - min) / range) * (height - pad * 2);
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(" ");
+}
+
+function niceMax(values) {
+  const max = Math.max(...values.map((value) => Number(value || 0)), 1);
+  const pow = 10 ** Math.floor(Math.log10(max));
+  return Math.ceil(max / pow) * pow;
+}
+
+function lastTwelveMonths() {
+  const current = parseDate(today()) || new Date();
+  const start = new Date(current.getFullYear(), current.getMonth() - 11, 1);
+  return Array.from({ length: 12 }, (_, index) => {
+    const dt = new Date(start.getFullYear(), start.getMonth() + index, 1);
+    return { key: `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}`, label: monthShort(dt.getMonth()) };
+  });
+}
+
+function monthBounds(monthKey) {
+  const [year, month] = monthKey.split("-").map(Number);
+  return {
+    start: new Date(year, month - 1, 1),
+    end: new Date(year, month, 0, 23, 59, 59),
+  };
+}
+
+function monthKeyFromValue(value) {
+  const parsed = parseDate(value);
+  return parsed ? `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, "0")}` : "";
+}
+
+function monthShort(index) {
+  return ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"][index] || "";
+}
+
+function monthTitle(value) {
+  const parsed = parseDate(value) || new Date();
+  const label = ["Janeiro", "Fevereiro", "Marco", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"][parsed.getMonth()];
+  return `${label} de ${parsed.getFullYear()}`;
+}
+
+function compactMoney(value) {
+  const number = Number(value || 0);
+  const abs = Math.abs(number);
+  if (abs >= 1000000) return `R$ ${decimalPt(number / 1000000, 1)} mi`;
+  if (abs >= 1000) return `R$ ${decimalPt(number / 1000, abs >= 100000 ? 0 : 1)} mil`;
+  return moneyCents(number);
+}
+
+function decimalPt(value, digits) {
+  return Number(value || 0).toLocaleString("pt-BR", { minimumFractionDigits: digits, maximumFractionDigits: digits }).replace(",0", "");
+}
+
+function shortText(value, max = 32) {
+  const text = cleanImport(value);
+  return text.length > max ? `${text.slice(0, max - 3)}...` : text;
+}
+
+function titleCaseText(value) {
+  return cleanImport(value)
+    .toLowerCase()
+    .split(/\s+/)
+    .map((word) => word ? `${word[0].toUpperCase()}${word.slice(1)}` : "")
+    .join(" ");
 }
 
 function renderKanban() {
@@ -2341,6 +2826,11 @@ function bindDynamicActions() {
   document.querySelectorAll("[data-client-letter]").forEach((button) => button.addEventListener("click", () => generateClientRenewalLetter(button.dataset.clientLetter)));
   document.querySelectorAll("[data-client-add-renewal]").forEach((button) => button.addEventListener("click", () => openContractRenewalForm(button.dataset.clientAddRenewal)));
   document.querySelectorAll("[data-client-docs], [data-client-certificate]").forEach((button) => button.addEventListener("click", () => openClientLinkedForm("documentos", button.dataset.clientDocs || button.dataset.clientCertificate)));
+  document.querySelectorAll("[data-dashboard-notifications]").forEach((button) => button.addEventListener("click", () => {
+    state.dashboardNotificationsOpen = !state.dashboardNotificationsOpen;
+    renderDashboard();
+  }));
+  document.querySelectorAll("[data-dashboard-goal]").forEach((button) => button.addEventListener("click", openDashboardGoalForm));
   document.querySelectorAll("[data-ai]").forEach((button) => button.addEventListener("click", () => openAiWorkspace(button.dataset.ai)));
   document.querySelectorAll("[data-ai-analyze-pdf]").forEach((button) => button.addEventListener("click", analyzePdfFromPanel));
   document.querySelectorAll("[data-ai-save-contract]").forEach((button) => button.addEventListener("click", saveAiDraftContract));
@@ -2909,6 +3399,7 @@ function fillContractFormFromAi(contract, fileName) {
     name: contract.name,
     client: contract.client,
     agency: contract.agency,
+    responsibleCompany: contract.responsibleCompany,
     object: contract.object,
     legalBasis: contract.legalBasis,
     legalRegime: contract.legalRegime,
@@ -3686,6 +4177,7 @@ function contractFromAiExtraction(data, fileName = "") {
     name,
     client,
     agency,
+    responsibleCompany: cleanImport(data.empresa_responsavel) || cleanImport(data.contratada),
     object: cleanImport(data.objeto),
     legalBasis: cleanImport(data.fundamento_legal),
     legalRegime: cleanImport(data.regime_legal),
