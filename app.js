@@ -447,11 +447,13 @@ function defaultAiConfig() {
     enabled: true,
     provider: "firebase-ai-logic",
     model: "gemini-3.6-flash",
+    connectionMode: "firebase-ai-logic",
+    apiKey: "",
     endpointUrl: "",
     secretRef: "Firebase AI Logic",
     status: "green",
     updatedAt: today(),
-    notes: "Use Firebase AI Logic para manter a chave fora do navegador. Outros provedores devem usar um endpoint seguro.",
+    notes: "Use Firebase AI Logic ou cadastre uma chave direta para testes controlados. Chaves diretas ficam visiveis para usuarios com acesso aos parametros.",
   };
 }
 
@@ -2859,7 +2861,7 @@ function aiSetupNotice(aiOnline) {
   if (aiOnline) {
     return `<div class="ai-notice success"><strong>Conexao preparada</strong><span>Provedor ativo: ${escapeHtml(aiProviderLabel(config.provider))}. Modelo: ${escapeHtml(config.model || "padrao")}.</span></div>`;
   }
-  return `<div class="ai-notice warn"><strong>Configuracao pendente</strong><span>Configure a IA em Parametros > IA. Para provedores externos, use um endpoint seguro.</span></div>`;
+  return `<div class="ai-notice warn"><strong>Configuracao pendente</strong><span>Configure a IA em Parametros > IA. Para Gemini, voce pode usar chave direta; para outros provedores, endpoint seguro pode ser necessario.</span></div>`;
 }
 
 function aiExtractionResult() {
@@ -2986,7 +2988,17 @@ function renderAiSettingsPanel() {
           </select>
         </label>
         <label>Modelo
-          <input name="model" type="text" value="${escapeAttr(config.model || "")}" placeholder="ex: gemini-3.6-flash, gpt-5, claude..." />
+          <input name="model" type="text" value="${escapeAttr(config.model || "")}" placeholder="ex: gemini-3.6-flash, gemini-2.5-pro..." />
+        </label>
+        <label>Modo de conexao
+          <select name="connectionMode">
+            <option value="firebase-ai-logic" ${config.connectionMode === "firebase-ai-logic" ? "selected" : ""}>Firebase AI Logic</option>
+            <option value="direct-api-key" ${config.connectionMode === "direct-api-key" ? "selected" : ""}>Chave direta no navegador</option>
+            <option value="secure-endpoint" ${config.connectionMode === "secure-endpoint" ? "selected" : ""}>Endpoint seguro</option>
+          </select>
+        </label>
+        <label>Chave da API
+          <input name="apiKey" type="password" value="${escapeAttr(config.apiKey || "")}" placeholder="Cole a chave da API" autocomplete="off" />
         </label>
         <label class="wide">Endpoint seguro
           <input name="endpointUrl" type="url" value="${escapeAttr(config.endpointUrl || "")}" placeholder="https://sua-funcao.cloudfunctions.net/ai" />
@@ -3013,7 +3025,9 @@ function renderAiSettingsPanel() {
         <strong>${escapeHtml(aiProviderLabel(config.provider))}</strong>
         <span>${config.provider === "firebase-ai-logic"
           ? "Este provedor usa Firebase AI Logic e nao expoe chave de API no navegador."
-          : "Para este provedor, cadastre um endpoint seguro. Nao salve chaves privadas diretamente no app."}</span>
+          : config.connectionMode === "direct-api-key"
+            ? "Modo direto ativo. Para usar sem endpoint, selecione Google Gemini API. A chave fica salva no Firebase e pode ser lida por usuarios autorizados da plataforma."
+            : "Para este provedor, cadastre um endpoint seguro ou use chave direta quando suportado pelo navegador."}</span>
       </div>
       ${aiWorkspaceHtml()}
     </div>
@@ -3023,11 +3037,11 @@ function renderAiSettingsPanel() {
 function aiProviderOptions() {
   return [
     ["firebase-ai-logic", "Firebase AI Logic"],
-    ["openai", "OpenAI via endpoint seguro"],
-    ["anthropic", "Anthropic Claude via endpoint seguro"],
-    ["azure-openai", "Azure OpenAI via endpoint seguro"],
-    ["google-gemini", "Google Gemini API via endpoint seguro"],
-    ["mistral", "Mistral via endpoint seguro"],
+    ["google-gemini", "Google Gemini API"],
+    ["openai", "OpenAI"],
+    ["anthropic", "Anthropic Claude"],
+    ["azure-openai", "Azure OpenAI"],
+    ["mistral", "Mistral"],
     ["custom-endpoint", "Endpoint personalizado"],
   ];
 }
@@ -3142,6 +3156,8 @@ function saveAiConfigForm(event) {
     ...getAiConfig(),
     provider: String(form.get("provider") || "firebase-ai-logic"),
     model: String(form.get("model") || "").trim() || "gemini-3.6-flash",
+    connectionMode: String(form.get("connectionMode") || "firebase-ai-logic"),
+    apiKey: String(form.get("apiKey") || "").trim(),
     endpointUrl: String(form.get("endpointUrl") || "").trim(),
     secretRef: String(form.get("secretRef") || "").trim(),
     status: String(form.get("status") || "yellow"),

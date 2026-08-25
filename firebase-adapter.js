@@ -199,6 +199,17 @@
     return aiSettings().provider || "firebase-ai-logic";
   }
 
+  function aiConnectionMode() {
+    const config = aiSettings();
+    if (config.connectionMode) return config.connectionMode;
+    if (aiProvider() === "firebase-ai-logic") return "firebase-ai-logic";
+    return config.apiKey ? "direct-api-key" : "secure-endpoint";
+  }
+
+  function aiApiKey() {
+    return aiSettings().apiKey || aiSettings().directApiKey || "";
+  }
+
   function aiModelName() {
     return aiSettings().model || "gemini-3.6-flash";
   }
@@ -209,8 +220,13 @@
 
   function aiEnabled() {
     if (aiSettings().enabled === false) return false;
-    if (aiProvider() === "firebase-ai-logic") return configured;
+    if (aiProvider() === "firebase-ai-logic" || aiConnectionMode() === "firebase-ai-logic") return configured;
+    if (supportsDirectAi()) return true;
     return Boolean(aiEndpoint());
+  }
+
+  function supportsDirectAi() {
+    return aiConnectionMode() === "direct-api-key" && aiProvider() === "google-gemini" && Boolean(aiApiKey());
   }
 
   async function getAiModel() {
@@ -274,6 +290,47 @@
     }
   }
 
+  async function directGeminiRequest(prompt, filePayload = null) {
+    const key = aiApiKey();
+    if (!key) throw new Error("Chave da API Gemini nao configurada.");
+    const model = encodeURIComponent(aiModelName());
+    const parts = [{ text: prompt }];
+    if (filePayload?.data) {
+      parts.push({
+        inlineData: {
+          mimeType: filePayload.mimeType || "application/pdf",
+          data: filePayload.data,
+        },
+      });
+    }
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ role: "user", parts }],
+        generationConfig: { temperature: 0.2 },
+      }),
+    });
+    const text = await response.text();
+    if (!response.ok) {
+      try {
+        const parsed = JSON.parse(text);
+        throw new Error(parsed.error?.message || "A API Gemini retornou erro.");
+      } catch (error) {
+        throw new Error(error.message || text || "A API Gemini retornou erro.");
+      }
+    }
+    const json = JSON.parse(text);
+    const answer = (json.candidates || [])
+      .flatMap((candidate) => candidate.content?.parts || [])
+      .map((part) => part.text || "")
+      .filter(Boolean)
+      .join("\n")
+      .trim();
+    if (!answer) throw new Error("A API Gemini nao retornou texto.");
+    return answer;
+  }
+
   function parseJsonResponse(text) {
     const clean = String(text || "").trim().replace(/^```(?:json)?/i, "").replace(/```$/i, "").trim();
     try {
@@ -318,6 +375,13 @@ Responda somente JSON valido, sem markdown, neste formato:
 }
 Use strings vazias quando uma informacao nao estiver no documento. Valores devem ser numero em reais, sem separador de milhar.`;
     if (aiProvider() !== "firebase-ai-logic") {
+      if (supportsDirectAi()) {
+        const text = await directGeminiRequest(prompt, await fileToBase64Payload(file));
+        return parseJsonResponse(text);
+      }
+      if (aiConnectionMode() === "direct-api-key") {
+        throw new Error("Chamada direta com chave API esta disponivel para Google Gemini. Selecione Google Gemini API ou use endpoint seguro.");
+      }
       const custom = await customAiRequest("analyzeContractFile", {
         prompt,
         file: await fileToBase64Payload(file),
@@ -347,6 +411,12 @@ Dados da renovacao vinculada:
 ${JSON.stringify(renewal || {}, null, 2)}
 `;
     if (aiProvider() !== "firebase-ai-logic") {
+      if (supportsDirectAi()) {
+        return directGeminiRequest(prompt);
+      }
+      if (aiConnectionMode() === "direct-api-key") {
+        throw new Error("Chamada direta com chave API esta disponivel para Google Gemini. Selecione Google Gemini API ou use endpoint seguro.");
+      }
       const custom = await customAiRequest("generateRenewalLetter", {
         prompt,
         contract,
