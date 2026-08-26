@@ -6,7 +6,7 @@
     <title>VendeGov CRM - Sistema</title>
     <meta name="description" content="Sistema VendeGov CRM para empresas que vendem ao governo." />
     <link rel="icon" href="./assets/vendegov-crm-simbolo.svg" />
-    <link rel="stylesheet" href="./styles.css?v=20260825-consultor-ui-scope" />
+    <link rel="stylesheet" href="./styles.css?v=20260826-multitenant-v1" />
   </head>
   <body>
     <section class="login-screen" id="loginScreen">
@@ -28,6 +28,7 @@
           </label>
           <button type="submit" class="primary-button">Entrar no sistema</button>
           <button type="button" class="link-button login-reset" id="resetPasswordButton">Redefinir senha por e-mail</button>
+          <a class="link-button login-reset" href="./provisionar.html">Criar novo grupo</a>
         </form>
         <small>Ambiente conectado ao Firebase para uso real da equipe.</small>
       </div>
@@ -146,7 +147,7 @@
     <input id="importFile" type="file" accept=".json,.csv,application/json,text/csv" hidden />
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
     <script src="./firebase-config.js?v=20260824-firestore-safe-login"></script>
-    <script src="./firebase-adapter.js?v=20260825-consultor-ui-scope"></script>
-    <script src="./app.js?v=20260825-consultor-ui-scope"></script>
+    <script src="./firebase-adapter.js?v=20260826-multitenant-v1"></script>
+    <script src="./app.js?v=20260826-multitenant-v1"></script>
   </body>
 </html>

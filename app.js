@@ -805,6 +805,87 @@ function visibleDbSnapshot() {
   return snapshot;
 }
 
+function appPlanDefinitions() {
+  return cloud()?.planDefinitions?.() || {
+    basico: { id: "basico", name: "Plano Basico", maxUsers: 2, maxCompanies: 1, description: "2 usuarios e 1 empresa" },
+    intermediario: { id: "intermediario", name: "Plano Intermediario", maxUsers: 5, maxCompanies: 3, description: "5 usuarios e 3 empresas" },
+    profissional: { id: "profissional", name: "Plano Profissional", maxUsers: 12, maxCompanies: 8, description: "12 usuarios e 8 empresas" },
+    empresarial: { id: "empresarial", name: "Plano Empresarial", maxUsers: 30, maxCompanies: 20, description: "30 usuarios e 20 empresas" },
+  };
+}
+
+function currentTenantPlanInfo() {
+  const info = cloud()?.tenantInfo?.() || {};
+  const plans = appPlanDefinitions();
+  const plan = info.plan || plans[info.planId] || { id: "sem-limite", name: "Sem limite definido", maxUsers: 0, maxCompanies: 0, description: "Tenant legado sem limite aplicado" };
+  return { info, plan };
+}
+
+function finitePlanLimit(value) {
+  const number = Number(value || 0);
+  return Number.isFinite(number) && number > 0 ? number : Number.POSITIVE_INFINITY;
+}
+
+function planLimitForModule(moduleKey) {
+  const { plan } = currentTenantPlanInfo();
+  if (moduleKey === "usuarios") return finitePlanLimit(plan.maxUsers);
+  if (moduleKey === "empresas") return finitePlanLimit(plan.maxCompanies);
+  return Number.POSITIVE_INFINITY;
+}
+
+function planUsageForModule(moduleKey) {
+  return Array.isArray(db[moduleKey]) ? db[moduleKey].length : 0;
+}
+
+function planLimitReached(moduleKey) {
+  const limit = planLimitForModule(moduleKey);
+  return Number.isFinite(limit) && planUsageForModule(moduleKey) >= limit;
+}
+
+function planLimitLabel(limit) {
+  return Number.isFinite(limit) ? String(limit) : "sem limite";
+}
+
+function planLimitMessage(moduleKey) {
+  const label = moduleKey === "empresas" ? "empresas internas" : "usuarios";
+  const limit = planLimitForModule(moduleKey);
+  return `Limite do plano atingido para ${label}: ${planUsageForModule(moduleKey)}/${planLimitLabel(limit)}.`;
+}
+
+function tenantStatusLabel() {
+  const { info, plan } = currentTenantPlanInfo();
+  const tenantName = info.name || info.tenantId || cloud()?.tenantId?.() || "computeck-demo";
+  return `${tenantName} - ${plan.name || "Plano nao definido"}`;
+}
+
+function tenantPlanCard() {
+  const { info, plan } = currentTenantPlanInfo();
+  const tenantName = info.name || info.tenantId || cloud()?.tenantId?.() || "computeck-demo";
+  const userLimit = planLimitForModule("usuarios");
+  const companyLimit = planLimitForModule("empresas");
+  return `
+    <div class="config-card">
+      <h3>Tenant e plano</h3>
+      <ul>
+        <li>Grupo: ${escapeHtml(tenantName)}</li>
+        <li>Plano: ${escapeHtml(plan.name || "Nao definido")}</li>
+        <li>Usuarios: ${planUsageForModule("usuarios")}/${escapeHtml(planLimitLabel(userLimit))}</li>
+        <li>Empresas internas: ${planUsageForModule("empresas")}/${escapeHtml(planLimitLabel(companyLimit))}</li>
+      </ul>
+    </div>
+  `;
+}
+
+async function syncTenantAccessIfNeeded(moduleKey) {
+  if (moduleKey !== "usuarios" || !cloud()?.syncTenantAccess) return;
+  try {
+    await cloud().syncTenantAccess(db);
+  } catch (error) {
+    console.warn("Tenant access sync warning", error);
+    toast("Usuario salvo, mas a permissao de acesso ao tenant precisa ser conferida.");
+  }
+}
+
 async function enterSystem(email, password) {
   if (!cloudEnabled()) {
     setCloudStatus("Firebase obrigatorio. Verifique a configuracao do projeto.");
@@ -821,7 +902,7 @@ async function enterSystem(email, password) {
     db = shouldReplaceDemoDb ? emptyDb() : { ...emptyDb(), ...remoteDb };
     syncCloudAiConfig();
     updateUserProfileButton();
-    setCloudStatus(`Firebase conectado: ${loggedUser.email || "usuario autenticado"}.`);
+    setCloudStatus(`Firebase conectado: ${loggedUser.email || "usuario autenticado"} em ${tenantStatusLabel()}.`);
     toast("Firebase conectado. Dados carregados.");
   } catch (error) {
     const message = firebaseLoginMessage(error);
@@ -3086,6 +3167,7 @@ function renderSettings() {
       ${body}
     </section>
     <div class="config-grid">
+      ${tenantPlanCard()}
       <div class="config-card"><h3>Permissoes previstas</h3><ul><li>Administrador</li><li>Gestor</li><li>Comercial</li><li>Financeiro</li><li>Documentos</li></ul></div>
       <div class="config-card"><h3>Producao em nuvem</h3><ul><li>Banco de dados central</li><li>Login real por usuario</li><li>Anexos em armazenamento seguro</li><li>Backups e dominio proprio</li></ul></div>
     </div>
@@ -3773,6 +3855,10 @@ function openForm(moduleKey, id = null, defaults = {}) {
     toast("Seu perfil nao tem acesso a este modulo.");
     return;
   }
+  if (!id && planLimitReached(moduleKey)) {
+    toast(planLimitMessage(moduleKey));
+    return;
+  }
   closeDrawer();
   const item = id ? (db[moduleKey] || []).find((row) => row.id === id) : null;
   if (id && !canSeeRecord(moduleKey, item)) {
@@ -3953,6 +4039,10 @@ async function submitForm(event) {
   event.preventDefault();
   const { moduleKey, id } = state.editing || {};
   if (!moduleKey) return;
+  if (!id && planLimitReached(moduleKey)) {
+    toast(planLimitMessage(moduleKey));
+    return;
+  }
   const formData = new FormData(el.form);
   const values = {};
   const pendingUploads = [];
@@ -4008,6 +4098,7 @@ async function submitForm(event) {
     }
     if (moduleKey === "renovacoes" && !consultantScopeActive()) await processRenewalAutomation({ generateLetters: true });
     saveDb(`Editou ${schemas[moduleKey].singular}`, linkedClient ? `${values.name || id} vinculado a ${linkedClient.name}` : values.name || id);
+    await syncTenantAccessIfNeeded(moduleKey);
     updateUserProfileButton();
     toast("Registro atualizado.");
   } else {
@@ -4020,6 +4111,7 @@ async function submitForm(event) {
     }
     if (moduleKey === "renovacoes" && !consultantScopeActive()) await processRenewalAutomation({ generateLetters: true });
     saveDb(`Criou ${schemas[moduleKey].singular}`, linkedClient ? `${values.name || "novo registro"} vinculado a ${linkedClient.name}` : values.name || "novo registro");
+    await syncTenantAccessIfNeeded(moduleKey);
     updateUserProfileButton();
     toast("Registro criado.");
   }
@@ -4044,7 +4136,7 @@ function closeConfirm() {
   state.deleteTarget = null;
 }
 
-function deleteConfirmed() {
+async function deleteConfirmed() {
   const { moduleKey, id } = state.deleteTarget || {};
   if (!moduleKey) return;
   const item = db[moduleKey].find((row) => row.id === id);
@@ -4055,6 +4147,7 @@ function deleteConfirmed() {
   }
   db[moduleKey] = db[moduleKey].filter((row) => row.id !== id);
   saveDb(`Removeu ${schemas[moduleKey].singular}`, item?.name || id);
+  await syncTenantAccessIfNeeded(moduleKey);
   closeConfirm();
   closeDrawer();
   render();
@@ -4439,6 +4532,7 @@ function importConsultantsRows(rows, fileName) {
   let updated = 0;
   let skipped = 0;
   const users = [...(db.usuarios || [])];
+  const userLimit = planLimitForModule("usuarios");
   rows.forEach((row) => {
     const mapped = consultantFromCsvRow(row);
     if (!mapped) {
@@ -4460,12 +4554,17 @@ function importConsultantsRows(rows, fileName) {
       };
       updated += 1;
     } else {
+      if (Number.isFinite(userLimit) && users.length >= userLimit) {
+        skipped += 1;
+        return;
+      }
       users.unshift(mapped);
       created += 1;
     }
   });
   db.usuarios = users;
   saveDb("Importou consultores", `${created} novos, ${updated} atualizados, ${skipped} ignorados - ${fileName}`);
+  syncTenantAccessIfNeeded("usuarios");
   state.configTab = "usuarios";
   setView("configuracoes");
   toast(`${created} consultores importados, ${updated} atualizados.`);

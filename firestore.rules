@@ -10,22 +10,55 @@ service cloud.firestore {
       return /databases/$(database)/documents/tenants/$(tenantId)/members/$(request.auth.uid);
     }
 
+    function tenantPath(tenantId) {
+      return /databases/$(database)/documents/tenants/$(tenantId);
+    }
+
+    function tenantExists(tenantId) {
+      return exists(tenantPath(tenantId));
+    }
+
+    function emailAllowed(tenantId) {
+      return signedIn() &&
+        tenantExists(tenantId) &&
+        get(tenantPath(tenantId)).data.get("allowedEmails", []).hasAny([request.auth.token.email]);
+    }
+
+    function emailAdmin(tenantId) {
+      return signedIn() &&
+        tenantExists(tenantId) &&
+        get(tenantPath(tenantId)).data.get("adminEmails", []).hasAny([request.auth.token.email]);
+    }
+
     function isMember(tenantId) {
-      return signedIn() && exists(memberPath(tenantId));
+      return signedIn() && (exists(memberPath(tenantId)) || emailAllowed(tenantId));
     }
 
     function isAdmin(tenantId) {
-      return isMember(tenantId) && get(memberPath(tenantId)).data.role == "admin";
+      return signedIn() && (
+        (exists(memberPath(tenantId)) && get(memberPath(tenantId)).data.role == "admin") ||
+        emailAdmin(tenantId)
+      );
     }
 
     match /tenants/{tenantId} {
       allow read: if isMember(tenantId);
-      allow create, update: if isAdmin(tenantId);
+      allow create: if signedIn() &&
+        !tenantExists(tenantId) &&
+        request.resource.data.createdByUid == request.auth.uid &&
+        request.resource.data.adminEmails.hasAny([request.auth.token.email]);
+      allow update: if isAdmin(tenantId);
       allow delete: if false;
 
       match /members/{userId} {
         allow read: if isMember(tenantId);
-        allow create, update, delete: if isAdmin(tenantId);
+        allow create: if isAdmin(tenantId) || (
+          signedIn() &&
+          userId == request.auth.uid &&
+          tenantExists(tenantId) &&
+          get(tenantPath(tenantId)).data.createdByUid == request.auth.uid
+        );
+        allow update, delete: if isAdmin(tenantId);
       }
 
       match /snapshots/{snapshotId} {

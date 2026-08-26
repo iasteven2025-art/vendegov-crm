@@ -1,0 +1,456 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Provisionar VendeGov CRM</title>
+    <link rel="icon" href="./assets/vendegov-crm-simbolo.svg" />
+    <style>
+      :root {
+        --navy: #071b2d;
+        --green: #20b978;
+        --line: #dce6ef;
+        --muted: #60758b;
+        --soft: #f3f7fa;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-width: 320px;
+        background: linear-gradient(135deg, #f8fafc 0%, #eef5f2 100%);
+        color: var(--navy);
+        font-family: "Segoe UI", Arial, sans-serif;
+      }
+
+      main {
+        display: grid;
+        grid-template-columns: minmax(340px, 0.85fr) minmax(420px, 1.15fr);
+        min-height: 100vh;
+      }
+
+      .hero {
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        gap: 24px;
+        background: #ffffff;
+        border-right: 1px solid var(--line);
+        padding: 56px 7vw;
+      }
+
+      .hero img {
+        width: 248px;
+        max-width: 100%;
+      }
+
+      h1 {
+        max-width: 640px;
+        margin: 0;
+        font-size: clamp(36px, 4.4vw, 58px);
+        line-height: 1.04;
+        letter-spacing: 0;
+      }
+
+      .hero p {
+        max-width: 560px;
+        margin: 0;
+        color: var(--muted);
+        font-size: 18px;
+        line-height: 1.55;
+      }
+
+      .panel-wrap {
+        display: grid;
+        align-content: center;
+        padding: 48px 7vw;
+      }
+
+      .panel {
+        width: min(760px, 100%);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.96);
+        box-shadow: 0 24px 70px rgba(7, 27, 45, 0.13);
+        overflow: hidden;
+      }
+
+      .panel header {
+        border-bottom: 1px solid var(--line);
+        padding: 22px 24px;
+      }
+
+      .panel header span {
+        color: #0d9a64;
+        font-size: 12px;
+        font-weight: 900;
+        text-transform: uppercase;
+      }
+
+      .panel h2 {
+        margin: 7px 0 0;
+        font-size: 24px;
+      }
+
+      form {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 16px;
+        padding: 24px;
+      }
+
+      label {
+        display: grid;
+        gap: 7px;
+        color: #1f3042;
+        font-size: 13px;
+        font-weight: 800;
+      }
+
+      label.wide,
+      .actions,
+      .status {
+        grid-column: 1 / -1;
+      }
+
+      input,
+      select {
+        width: 100%;
+        min-width: 0;
+        height: 44px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #ffffff;
+        color: var(--navy);
+        padding: 0 12px;
+        font: inherit;
+        outline: 0;
+      }
+
+      input:focus,
+      select:focus {
+        border-color: rgba(32, 185, 120, 0.8);
+        box-shadow: 0 0 0 3px rgba(32, 185, 120, 0.14);
+      }
+
+      .plan-hint {
+        grid-column: 1 / -1;
+        display: grid;
+        gap: 8px;
+        border: 1px solid #cfe8db;
+        border-radius: 8px;
+        background: #f2fbf7;
+        color: #235a43;
+        padding: 14px;
+        font-size: 14px;
+      }
+
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 10px;
+      }
+
+      button,
+      a.button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 42px;
+        border-radius: 8px;
+        padding: 0 15px;
+        font: inherit;
+        font-weight: 850;
+        text-decoration: none;
+        cursor: pointer;
+      }
+
+      button.primary {
+        border: 1px solid #17a96b;
+        background: var(--green);
+        color: #061d13;
+        box-shadow: 0 10px 24px rgba(32, 185, 120, 0.2);
+      }
+
+      a.button {
+        border: 1px solid var(--line);
+        background: #ffffff;
+        color: var(--navy);
+      }
+
+      .status {
+        display: none;
+        border-radius: 8px;
+        background: var(--soft);
+        color: #26394b;
+        padding: 14px;
+        line-height: 1.45;
+      }
+
+      .status.show {
+        display: block;
+      }
+
+      .status.success {
+        border: 1px solid #b7e5d2;
+        background: #effbf5;
+        color: #0a6f49;
+      }
+
+      .status.error {
+        border: 1px solid #ffc8d1;
+        background: #fff1f4;
+        color: #b11638;
+      }
+
+      .status a {
+        color: inherit;
+        font-weight: 900;
+      }
+
+      @media (max-width: 860px) {
+        main,
+        form {
+          grid-template-columns: 1fr;
+        }
+
+        .hero,
+        .panel-wrap {
+          padding: 30px 22px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <section class="hero">
+        <img src="./assets/vendegov-crm-logo-horizontal.svg" alt="VendeGov CRM" />
+        <h1>Gerar uma nova copia multitenant</h1>
+        <p>
+          Crie um ambiente isolado para cada grupo de empresas. A URL gerada carrega a primeira versao do VendeGov,
+          com dados separados por tenant e limites conforme o plano contratado.
+        </p>
+      </section>
+
+      <section class="panel-wrap">
+        <div class="panel">
+          <header>
+            <span>Provisionamento</span>
+            <h2>Novo grupo de empresas</h2>
+          </header>
+          <form id="tenantForm">
+            <label>
+              E-mail do administrador
+              <input name="email" type="email" required placeholder="admin@empresa.com.br" />
+            </label>
+            <label>
+              Senha Firebase
+              <input name="password" type="password" required placeholder="senha do usuario autorizado" />
+            </label>
+            <label>
+              Nome do grupo
+              <input name="groupName" required placeholder="Grupo Actcon" />
+            </label>
+            <label>
+              Identificador da URL
+              <input name="tenantId" required placeholder="grupo-actcon" />
+            </label>
+            <label>
+              Plano contratado
+              <select name="planId" id="planSelect"></select>
+            </label>
+            <label>
+              Primeira empresa do grupo
+              <input name="companyName" placeholder="Actcon Solucoes Ltda" />
+            </label>
+            <label class="wide">
+              Nome do usuario administrador
+              <input name="adminName" placeholder="Steven Passos" />
+            </label>
+            <div class="plan-hint" id="planHint"></div>
+            <div class="actions">
+              <button class="primary" type="submit">Criar ambiente</button>
+              <a class="button" href="./">Voltar ao sistema</a>
+            </div>
+            <div class="status" id="statusBox"></div>
+          </form>
+        </div>
+      </section>
+    </main>
+
+    <script src="./firebase-config.js?v=20260824-firestore-safe-login"></script>
+    <script src="./firebase-adapter.js?v=20260826-multitenant-v1"></script>
+    <script>
+      const form = document.querySelector("#tenantForm");
+      const statusBox = document.querySelector("#statusBox");
+      const planSelect = document.querySelector("#planSelect");
+      const planHint = document.querySelector("#planHint");
+      const plans = window.VendeGovCloud.planDefinitions();
+
+      function now() {
+        return new Date().toISOString();
+      }
+
+      function uid() {
+        return crypto.randomUUID ? crypto.randomUUID() : `id-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      }
+
+      function record(values) {
+        return { id: uid(), createdAt: now(), updatedAt: now(), ...values };
+      }
+
+      function showStatus(message, type = "") {
+        statusBox.className = `status show ${type}`;
+        statusBox.innerHTML = message;
+      }
+
+      function planText(plan) {
+        return `${plan.name}: ${plan.maxUsers} usuario(s), ${plan.maxCompanies} empresa(s).`;
+      }
+
+      function renderPlans() {
+        planSelect.innerHTML = Object.values(plans)
+          .map((plan) => `<option value="${plan.id}">${planText(plan)}</option>`)
+          .join("");
+        updatePlanHint();
+      }
+
+      function updatePlanHint() {
+        const plan = plans[planSelect.value] || plans.basico;
+        planHint.innerHTML = `<strong>${plan.name}</strong><span>${plan.description}. Este limite vale para usuarios e empresas internas do grupo.</span>`;
+      }
+
+      function defaultAiConfig() {
+        return {
+          enabled: true,
+          provider: "firebase-ai-logic",
+          model: "gemini-3.6-flash",
+          connectionMode: "firebase-ai-logic",
+          apiKey: "",
+          endpointUrl: "",
+          secretRef: "Firebase AI Logic",
+          status: "green",
+          updatedAt: now().slice(0, 10),
+          notes: "Configuracao inicial do tenant.",
+        };
+      }
+
+      function emptyTenantDb({ groupName, companyName, adminName, adminEmail, plan }) {
+        const cleanCompany = companyName || groupName;
+        return {
+          clientes: [],
+          licitacoes: [],
+          propostas: [],
+          contratos: [],
+          documentos: [],
+          renovacoes: [],
+          agenda: [],
+          marketing: [],
+          financeiro: [],
+          comissoes: [],
+          usuarios: [
+            record({
+              name: adminName || adminEmail,
+              email: adminEmail,
+              role: "Administrador",
+              status: "green",
+              lastAccess: now().slice(0, 10),
+              notes: "Administrador inicial do tenant.",
+            }),
+          ],
+          templates: [],
+          empresas: cleanCompany
+            ? [
+                record({
+                  name: cleanCompany,
+                  cnpj: "",
+                  email: adminEmail,
+                  phone: "",
+                  address: "",
+                  city: "",
+                  logoUrl: "",
+                  portfolio: groupName,
+                  manager: adminName || adminEmail,
+                  status: "green",
+                  notes: "Empresa inicial do grupo.",
+                }),
+              ]
+            : [],
+          regioes: [],
+          documentosImportantes: [],
+          sistema: [
+            record({
+              name: "Plano de contratacao",
+              area: "Tenant",
+              value: plan.name,
+              status: "green",
+              updatedAt: now().slice(0, 10),
+              notes: `${plan.maxUsers} usuarios; ${plan.maxCompanies} empresas internas.`,
+            }),
+          ],
+          gruposUsuarios: [],
+          audit: [
+            {
+              id: uid(),
+              at: now(),
+              user: adminEmail,
+              action: "Criou tenant",
+              detail: `${groupName} - ${plan.name}`,
+            },
+          ],
+          notificacoes: [],
+          aiConfig: defaultAiConfig(),
+        };
+      }
+
+      form.groupName.addEventListener("input", () => {
+        if (!form.tenantId.dataset.touched) {
+          form.tenantId.value = window.VendeGovCloud.normalizeTenantId(form.groupName.value);
+        }
+      });
+      form.tenantId.addEventListener("input", () => {
+        form.tenantId.dataset.touched = "true";
+        form.tenantId.value = window.VendeGovCloud.normalizeTenantId(form.tenantId.value);
+      });
+      planSelect.addEventListener("change", updatePlanHint);
+
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const data = Object.fromEntries(new FormData(form).entries());
+        const plan = plans[data.planId] || plans.basico;
+        showStatus("Conectando ao Firebase e criando o tenant...");
+        try {
+          const user = await window.VendeGovCloud.signIn(data.email, data.password);
+          const adminEmail = (user.email || data.email || "").toLowerCase();
+          const seedDb = emptyTenantDb({
+            groupName: data.groupName.trim(),
+            companyName: data.companyName.trim(),
+            adminName: data.adminName.trim(),
+            adminEmail,
+            plan,
+          });
+          const result = await window.VendeGovCloud.provisionTenant({
+            tenantId: data.tenantId,
+            groupName: data.groupName.trim(),
+            planId: plan.id,
+            adminName: data.adminName.trim(),
+            adminEmail,
+            seedDb,
+          });
+          showStatus(
+            `Ambiente criado com sucesso.<br>URL de acesso: <a href="${result.url}">${result.url}</a>`,
+            "success"
+          );
+        } catch (error) {
+          showStatus(error.message || "Nao foi possivel criar o tenant.", "error");
+        }
+      });
+
+      renderPlans();
+    </script>
+  </body>
+</html>

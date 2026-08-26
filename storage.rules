@@ -6,9 +6,21 @@ service firebase.storage {
       return request.auth != null;
     }
 
-    function isMember(tenantId) {
+    function tenantPath(tenantId) {
+      return /databases/(default)/documents/tenants/$(tenantId);
+    }
+
+    function emailAllowed(tenantId) {
       return signedIn() &&
-        firestore.exists(/databases/(default)/documents/tenants/$(tenantId)/members/$(request.auth.uid));
+        firestore.exists(tenantPath(tenantId)) &&
+        firestore.get(tenantPath(tenantId)).data.get("allowedEmails", []).hasAny([request.auth.token.email]);
+    }
+
+    function isMember(tenantId) {
+      return signedIn() && (
+        firestore.exists(/databases/(default)/documents/tenants/$(tenantId)/members/$(request.auth.uid)) ||
+        emailAllowed(tenantId)
+      );
     }
 
     match /tenants/{tenantId}/{allPaths=**} {

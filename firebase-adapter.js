@@ -17,13 +17,98 @@
   let user = null;
   let libsPromise = null;
   let runtimeAiSettings = {};
+  let tenantMeta = {};
+
+  function normalizeTenantId(value) {
+    return String(value || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 48);
+  }
+
+  function tenantFromLocation() {
+    const url = new URL(window.location.href);
+    const pathMatch = url.pathname.match(/\/(?:t|tenant|grupo)\/([^/]+)/i);
+    return url.searchParams.get("tenant") || url.searchParams.get("grupo") || (pathMatch ? pathMatch[1] : "");
+  }
+
+  const selectedTenantId = normalizeTenantId(tenantFromLocation() || settings.tenantId || "computeck-demo");
 
   function tenantId() {
-    return settings.tenantId || "computeck-demo";
+    return selectedTenantId || "computeck-demo";
+  }
+
+  function tenantPath() {
+    return ["tenants", tenantId()];
   }
 
   function snapshotPath() {
     return ["tenants", tenantId(), "snapshots", "main"];
+  }
+
+  function tenantUrl(id = tenantId()) {
+    const cleanId = normalizeTenantId(id);
+    const basePath = window.location.pathname.replace(/\/provisionar\.html$/i, "/").replace(/\/(?:t|tenant|grupo)\/[^/]+$/i, "/");
+    const url = new URL(basePath || "/", window.location.origin);
+    url.searchParams.set("tenant", cleanId);
+    return url.toString();
+  }
+
+  function planDefinitions() {
+    return {
+      basico: {
+        id: "basico",
+        name: "Plano Basico",
+        maxUsers: 2,
+        maxCompanies: 1,
+        description: "2 usuarios e 1 empresa do grupo",
+      },
+      intermediario: {
+        id: "intermediario",
+        name: "Plano Intermediario",
+        maxUsers: 5,
+        maxCompanies: 3,
+        description: "5 usuarios e ate 3 empresas do grupo",
+      },
+      profissional: {
+        id: "profissional",
+        name: "Plano Profissional",
+        maxUsers: 12,
+        maxCompanies: 8,
+        description: "12 usuarios e ate 8 empresas do grupo",
+      },
+      empresarial: {
+        id: "empresarial",
+        name: "Plano Empresarial",
+        maxUsers: 30,
+        maxCompanies: 20,
+        description: "30 usuarios e ate 20 empresas do grupo",
+      },
+    };
+  }
+
+  function tenantInfo() {
+    return { tenantId: tenantId(), url: tenantUrl(), ...(tenantMeta || {}) };
+  }
+
+  function tenantAccessFromDb(data = {}) {
+    const rows = Array.isArray(data.usuarios) ? data.usuarios : [];
+    const activeRows = rows.filter((item) => !["red", "bloqueado", "inativo"].includes(String(item.status || "").toLowerCase()));
+    const allowedEmails = activeRows
+      .map((item) => String(item.email || item.contactEmail || "").trim().toLowerCase())
+      .filter(Boolean);
+    const adminEmails = activeRows
+      .filter((item) => /administrador|gestor/i.test(String(item.role || "")))
+      .map((item) => String(item.email || item.contactEmail || "").trim().toLowerCase())
+      .filter(Boolean);
+    const currentEmail = auth?.currentUser?.email ? String(auth.currentUser.email).toLowerCase() : "";
+    return {
+      allowedEmails: [...new Set([...allowedEmails, currentEmail].filter(Boolean))],
+      adminEmails: [...new Set([...(adminEmails.length ? adminEmails : [currentEmail]), currentEmail].filter(Boolean))],
+    };
   }
 
   function cleanForFirestore(value) {
@@ -111,6 +196,9 @@
     if (!configured) return seedData;
     const ctx = await init();
     const libs = await loadLibs();
+    const tenantRef = libs.firestoreLib.doc(ctx.firestore, ...tenantPath());
+    const tenantSnap = await libs.firestoreLib.getDoc(tenantRef);
+    tenantMeta = tenantSnap.exists() ? tenantSnap.data() : { tenantId: tenantId(), name: tenantId() };
     const ref = libs.firestoreLib.doc(ctx.firestore, ...snapshotPath());
     const snap = await libs.firestoreLib.getDoc(ref);
     if (snap.exists() && snap.data().db) return snap.data().db;
@@ -184,6 +272,77 @@
     };
     const docRef = await libs.firestoreLib.addDoc(ref, payload);
     return docRef.id;
+  }
+
+  async function syncTenantAccess(data) {
+    if (!configured || !auth || !auth.currentUser) return null;
+    const ctx = await init();
+    const libs = await loadLibs();
+    const access = tenantAccessFromDb(data);
+    const ref = libs.firestoreLib.doc(ctx.firestore, ...tenantPath());
+    await libs.firestoreLib.setDoc(
+      ref,
+      {
+        ...access,
+        tenantId: tenantId(),
+        updatedAt: libs.firestoreLib.serverTimestamp(),
+        updatedBy: auth.currentUser.email || auth.currentUser.uid,
+      },
+      { merge: true }
+    );
+    tenantMeta = { ...tenantMeta, ...access };
+    return access;
+  }
+
+  async function provisionTenant(options = {}) {
+    if (!configured) throw new Error("Firebase nao configurado.");
+    const ctx = await init();
+    const libs = await loadLibs();
+    if (!ctx.auth.currentUser) throw new Error("Entre com um usuario autorizado para criar ambientes.");
+    const cleanTenantId = normalizeTenantId(options.tenantId || options.groupName || options.name);
+    if (!cleanTenantId) throw new Error("Informe um nome valido para gerar a URL do grupo.");
+    const plans = planDefinitions();
+    const plan = plans[options.planId] || plans.basico;
+    const adminEmail = String(options.adminEmail || ctx.auth.currentUser.email || "").trim().toLowerCase();
+    const ownerEmail = String(ctx.auth.currentUser.email || "").trim().toLowerCase();
+    const allowedEmails = [...new Set([ownerEmail, adminEmail].filter(Boolean))];
+    const adminEmails = allowedEmails;
+    const tenantRef = libs.firestoreLib.doc(ctx.firestore, "tenants", cleanTenantId);
+    const existing = await libs.firestoreLib.getDoc(tenantRef);
+    if (existing.exists()) throw new Error("Ja existe um grupo com essa URL. Escolha outro identificador.");
+    const meta = {
+      tenantId: cleanTenantId,
+      name: String(options.groupName || options.name || cleanTenantId).trim(),
+      status: "active",
+      planId: plan.id,
+      plan,
+      version: "v1",
+      allowedEmails,
+      adminEmails,
+      createdBy: ownerEmail || ctx.auth.currentUser.uid,
+      createdByUid: ctx.auth.currentUser.uid,
+      createdAt: libs.firestoreLib.serverTimestamp(),
+      updatedAt: libs.firestoreLib.serverTimestamp(),
+    };
+    await libs.firestoreLib.setDoc(tenantRef, meta);
+    await libs.firestoreLib.setDoc(
+      libs.firestoreLib.doc(ctx.firestore, "tenants", cleanTenantId, "members", ctx.auth.currentUser.uid),
+      cleanForFirestore({
+        email: ownerEmail,
+        name: options.adminName || ownerEmail || "Administrador",
+        role: "admin",
+        status: "active",
+        createdAt: new Date().toISOString(),
+      })
+    );
+    await libs.firestoreLib.setDoc(libs.firestoreLib.doc(ctx.firestore, "tenants", cleanTenantId, "snapshots", "main"), {
+      db: cleanForFirestore(options.seedDb || {}),
+      tenantId: cleanTenantId,
+      createdAt: libs.firestoreLib.serverTimestamp(),
+      updatedAt: libs.firestoreLib.serverTimestamp(),
+      updatedBy: ownerEmail || ctx.auth.currentUser.uid,
+    });
+    return { tenantId: cleanTenantId, name: meta.name, planId: plan.id, plan, url: tenantUrl(cleanTenantId) };
   }
 
   function setAiConfig(config = {}) {
@@ -433,12 +592,18 @@ ${JSON.stringify(renewal || {}, null, 2)}
     enabled: configured,
     settings,
     tenantId,
+    tenantInfo,
+    tenantUrl,
+    normalizeTenantId,
+    planDefinitions,
     init,
     signIn,
     resetPassword,
     signOut: signOutUser,
     loadDb,
     saveDb,
+    syncTenantAccess,
+    provisionTenant,
     uploadFile,
     queueEmail,
     setAiConfig,
