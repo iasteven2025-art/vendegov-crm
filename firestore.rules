@@ -6,6 +6,10 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function isSuperAdmin() {
+      return signedIn() && request.auth.token.email == "steven.passos@computeck.com.br";
+    }
+
     function memberPath(tenantId) {
       return /databases/$(database)/documents/tenants/$(tenantId)/members/$(request.auth.uid);
     }
@@ -31,11 +35,12 @@ service cloud.firestore {
     }
 
     function isMember(tenantId) {
-      return signedIn() && (exists(memberPath(tenantId)) || emailAllowed(tenantId));
+      return signedIn() && (isSuperAdmin() || exists(memberPath(tenantId)) || emailAllowed(tenantId));
     }
 
     function isAdmin(tenantId) {
       return signedIn() && (
+        isSuperAdmin() ||
         (exists(memberPath(tenantId)) && get(memberPath(tenantId)).data.role == "admin") ||
         emailAdmin(tenantId)
       );
@@ -43,7 +48,7 @@ service cloud.firestore {
 
     match /tenants/{tenantId} {
       allow read: if isMember(tenantId);
-      allow create: if signedIn() &&
+      allow create: if isSuperAdmin() &&
         !tenantExists(tenantId) &&
         request.resource.data.createdByUid == request.auth.uid &&
         request.resource.data.adminEmails.hasAny([request.auth.token.email]);
@@ -52,13 +57,18 @@ service cloud.firestore {
 
       match /members/{userId} {
         allow read: if isMember(tenantId);
-        allow create: if isAdmin(tenantId) || (
+        allow create: if isSuperAdmin() || isAdmin(tenantId) || (
           signedIn() &&
           userId == request.auth.uid &&
           tenantExists(tenantId) &&
           get(tenantPath(tenantId)).data.createdByUid == request.auth.uid
         );
         allow update, delete: if isAdmin(tenantId);
+      }
+
+      match /public/{documentId} {
+        allow read: if true;
+        allow write: if isAdmin(tenantId);
       }
 
       match /snapshots/{snapshotId} {

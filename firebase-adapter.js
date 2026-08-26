@@ -2,6 +2,7 @@
   const sdkVersion = "12.17.1";
   const settings = window.VENDEGOV_FIREBASE_CONFIG || {};
   const firebaseConfig = settings.firebase || {};
+  const SUPERADMIN_EMAIL = "steven.passos@computeck.com.br";
   const configured =
     settings.enabled === true &&
     firebaseConfig.projectId &&
@@ -27,6 +28,18 @@
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/^-+|-+$/g, "")
       .slice(0, 48);
+  }
+
+  function normalizeEmail(value) {
+    return String(value || "").trim().toLowerCase();
+  }
+
+  function superAdminEmail() {
+    return SUPERADMIN_EMAIL;
+  }
+
+  function isSuperAdmin(userLike = auth?.currentUser || user) {
+    return normalizeEmail(userLike?.email) === SUPERADMIN_EMAIL;
   }
 
   function tenantFromLocation() {
@@ -92,6 +105,10 @@
 
   function tenantInfo() {
     return { tenantId: tenantId(), url: tenantUrl(), ...(tenantMeta || {}) };
+  }
+
+  function publicTenantPath(id = tenantId()) {
+    return ["tenants", normalizeTenantId(id), "public", "config"];
   }
 
   function tenantAccessFromDb(data = {}) {
@@ -190,6 +207,29 @@
     const ctx = await init();
     const libs = await loadLibs();
     await libs.authLib.sendPasswordResetEmail(ctx.auth, email);
+  }
+
+  async function waitForAuth() {
+    if (!configured) return null;
+    const ctx = await init();
+    const libs = await loadLibs();
+    if (ctx.auth.currentUser) return ctx.auth.currentUser;
+    return new Promise((resolve) => {
+      const unsubscribe = libs.authLib.onAuthStateChanged(ctx.auth, (currentUser) => {
+        user = currentUser;
+        unsubscribe();
+        resolve(currentUser);
+      });
+    });
+  }
+
+  async function loadPublicTenantConfig(id = tenantId()) {
+    if (!configured) return null;
+    const ctx = await init();
+    const libs = await loadLibs();
+    const ref = libs.firestoreLib.doc(ctx.firestore, ...publicTenantPath(id));
+    const snap = await libs.firestoreLib.getDoc(ref);
+    return snap.exists() ? snap.data() : null;
   }
 
   async function loadDb(seedData) {
@@ -299,14 +339,30 @@
     const ctx = await init();
     const libs = await loadLibs();
     if (!ctx.auth.currentUser) throw new Error("Entre com um usuario autorizado para criar ambientes.");
+    if (!isSuperAdmin(ctx.auth.currentUser)) throw new Error("Apenas o superadmin pode criar ambientes.");
     const cleanTenantId = normalizeTenantId(options.tenantId || options.groupName || options.name);
     if (!cleanTenantId) throw new Error("Informe um nome valido para gerar a URL do grupo.");
     const plans = planDefinitions();
-    const plan = plans[options.planId] || plans.basico;
-    const adminEmail = String(options.adminEmail || ctx.auth.currentUser.email || "").trim().toLowerCase();
-    const ownerEmail = String(ctx.auth.currentUser.email || "").trim().toLowerCase();
+    const basePlan = plans[options.planId] || plans.basico;
+    const plan = cleanForFirestore({ ...basePlan, ...(options.plan || {}) });
+    const adminEmail = normalizeEmail(options.adminEmail || ctx.auth.currentUser.email || "");
+    const ownerEmail = normalizeEmail(ctx.auth.currentUser.email || "");
     const allowedEmails = [...new Set([ownerEmail, adminEmail].filter(Boolean))];
     const adminEmails = allowedEmails;
+    const branding = cleanForFirestore(options.branding || {});
+    const loginCustomization = cleanForFirestore(options.loginCustomization || {});
+    const publicConfig = cleanForFirestore({
+      tenantId: cleanTenantId,
+      name: String(options.groupName || options.name || cleanTenantId).trim(),
+      version: "v1",
+      branding,
+      loginCustomization,
+      plan: {
+        id: plan.id,
+        name: plan.name,
+        description: plan.description,
+      },
+    });
     const tenantRef = libs.firestoreLib.doc(ctx.firestore, "tenants", cleanTenantId);
     const existing = await libs.firestoreLib.getDoc(tenantRef);
     if (existing.exists()) throw new Error("Ja existe um grupo com essa URL. Escolha outro identificador.");
@@ -316,6 +372,8 @@
       status: "active",
       planId: plan.id,
       plan,
+      branding,
+      loginCustomization,
       version: "v1",
       allowedEmails,
       adminEmails,
@@ -335,6 +393,18 @@
         createdAt: new Date().toISOString(),
       })
     );
+    if (options.adminUid) {
+      await libs.firestoreLib.setDoc(
+        libs.firestoreLib.doc(ctx.firestore, "tenants", cleanTenantId, "members", options.adminUid),
+        cleanForFirestore({
+          email: adminEmail,
+          name: options.adminName || adminEmail || "Administrador",
+          role: "admin",
+          status: "active",
+          createdAt: new Date().toISOString(),
+        })
+      );
+    }
     await libs.firestoreLib.setDoc(libs.firestoreLib.doc(ctx.firestore, "tenants", cleanTenantId, "snapshots", "main"), {
       db: cleanForFirestore(options.seedDb || {}),
       tenantId: cleanTenantId,
@@ -342,7 +412,44 @@
       updatedAt: libs.firestoreLib.serverTimestamp(),
       updatedBy: ownerEmail || ctx.auth.currentUser.uid,
     });
+    await libs.firestoreLib.setDoc(libs.firestoreLib.doc(ctx.firestore, ...publicTenantPath(cleanTenantId)), {
+      ...publicConfig,
+      updatedAt: libs.firestoreLib.serverTimestamp(),
+    });
     return { tenantId: cleanTenantId, name: meta.name, planId: plan.id, plan, url: tenantUrl(cleanTenantId) };
+  }
+
+  async function createAuthUser(options = {}) {
+    if (!configured) throw new Error("Firebase nao configurado.");
+    const ctx = await init();
+    const libs = await loadLibs();
+    if (!isSuperAdmin(ctx.auth.currentUser)) throw new Error("Apenas o superadmin pode criar usuarios.");
+    const email = normalizeEmail(options.email);
+    const password = String(options.password || "");
+    const displayName = String(options.displayName || options.name || "").trim();
+    if (!email) throw new Error("Informe o e-mail do usuario administrador.");
+    if (!password || password.length < 6) throw new Error("A senha do usuario deve ter pelo menos 6 caracteres.");
+    const secondaryName = `vendegov-user-create-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const secondaryApp = libs.appLib.initializeApp(firebaseConfig, secondaryName);
+    const secondaryAuth = libs.authLib.getAuth(secondaryApp);
+    try {
+      const credential = await libs.authLib.createUserWithEmailAndPassword(secondaryAuth, email, password);
+      if (displayName) await libs.authLib.updateProfile(credential.user, { displayName });
+      return {
+        uid: credential.user.uid,
+        email,
+        displayName,
+        created: true,
+      };
+    } catch (error) {
+      if (String(error?.code || "").includes("email-already-in-use")) {
+        return { uid: "", email, displayName, created: false, existing: true };
+      }
+      throw error;
+    } finally {
+      await libs.authLib.signOut(secondaryAuth).catch(() => {});
+      await libs.appLib.deleteApp(secondaryApp).catch(() => {});
+    }
   }
 
   function setAiConfig(config = {}) {
@@ -595,15 +702,20 @@ ${JSON.stringify(renewal || {}, null, 2)}
     tenantInfo,
     tenantUrl,
     normalizeTenantId,
+    superAdminEmail,
+    isSuperAdmin,
     planDefinitions,
     init,
     signIn,
+    waitForAuth,
     resetPassword,
     signOut: signOutUser,
+    loadPublicTenantConfig,
     loadDb,
     saveDb,
     syncTenantAccess,
     provisionTenant,
+    createAuthUser,
     uploadFile,
     queueEmail,
     setAiConfig,

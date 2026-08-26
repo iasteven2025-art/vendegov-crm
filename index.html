@@ -6,14 +6,14 @@
     <title>VendeGov CRM - Sistema</title>
     <meta name="description" content="Sistema VendeGov CRM para empresas que vendem ao governo." />
     <link rel="icon" href="./assets/vendegov-crm-simbolo.svg" />
-    <link rel="stylesheet" href="./styles.css?v=20260826-multitenant-v2" />
+    <link rel="stylesheet" href="./styles.css?v=20260826-superadmin-provisioning" />
   </head>
   <body>
     <section class="login-screen" id="loginScreen">
       <div class="login-panel">
-        <img class="login-logo" src="./assets/vendegov-crm-logo-horizontal.svg" alt="VendeGov CRM" />
-        <h1>Operacao comercial B2G em um unico lugar</h1>
-        <p>
+        <img class="login-logo" id="loginLogo" src="./assets/vendegov-crm-logo-horizontal.svg" alt="VendeGov CRM" />
+        <h1 id="loginTitle">Operacao comercial B2G em um unico lugar</h1>
+        <p id="loginSubtitle">
           Controle agenda, clientes, licitacoes, propostas, marketing, contratos, documentos,
           renovacoes, comissoes, relatorios e parametrizacao.
         </p>
@@ -28,9 +28,8 @@
           </label>
           <button type="submit" class="primary-button">Entrar no sistema</button>
           <button type="button" class="link-button login-reset" id="resetPasswordButton">Redefinir senha por e-mail</button>
-          <a class="link-button login-reset" href="./provisionar.html">Criar novo grupo</a>
         </form>
-        <small>Ambiente conectado ao Firebase para uso real da equipe.</small>
+        <small id="loginNote">Ambiente conectado ao Firebase para uso real da equipe.</small>
       </div>
       <div class="login-aside">
         <div class="aside-card">
@@ -49,10 +48,10 @@
     <div class="app-shell hidden" id="appShell">
       <aside class="sidebar">
         <div class="brand">
-          <img src="./assets/vendegov-crm-simbolo.svg" alt="" />
+          <img id="sidebarLogo" src="./assets/vendegov-crm-simbolo.svg" alt="" />
           <div>
-            <strong>VendeGov</strong>
-            <span>CRM B2G</span>
+            <strong id="sidebarBrandName">VendeGov</strong>
+            <span id="sidebarBrandTagline">CRM B2G</span>
           </div>
         </div>
         <nav class="nav-list" id="mainNav" aria-label="Menu principal"></nav>
@@ -147,7 +146,7 @@
     <input id="importFile" type="file" accept=".json,.csv,application/json,text/csv" hidden />
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
     <script src="./firebase-config.js?v=20260824-firestore-safe-login"></script>
-    <script src="./firebase-adapter.js?v=20260826-multitenant-v2"></script>
-    <script src="./app.js?v=20260826-multitenant-v2"></script>
+    <script src="./firebase-adapter.js?v=20260826-superadmin-provisioning"></script>
+    <script src="./app.js?v=20260826-superadmin-provisioning"></script>
   </body>
 </html>

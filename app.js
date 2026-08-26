@@ -399,6 +399,10 @@ let db = emptyDb();
 
 const el = {
   loginScreen: document.querySelector("#loginScreen"),
+  loginLogo: document.querySelector("#loginLogo"),
+  loginTitle: document.querySelector("#loginTitle"),
+  loginSubtitle: document.querySelector("#loginSubtitle"),
+  loginNote: document.querySelector("#loginNote"),
   appShell: document.querySelector("#appShell"),
   loginForm: document.querySelector("#loginForm"),
   resetPasswordButton: document.querySelector("#resetPasswordButton"),
@@ -436,6 +440,9 @@ const el = {
   closeDrawer: document.querySelector("#closeDrawer"),
   toast: document.querySelector("#toast"),
   cloudStatus: document.querySelector("#cloudStatus"),
+  sidebarLogo: document.querySelector("#sidebarLogo"),
+  sidebarBrandName: document.querySelector("#sidebarBrandName"),
+  sidebarBrandTagline: document.querySelector("#sidebarBrandTagline"),
 };
 
 function field(name, label, type, required = false, options = null, extra = {}) {
@@ -607,6 +614,40 @@ function cloudEnabled() {
 
 function setCloudStatus(message) {
   if (el.cloudStatus) el.cloudStatus.textContent = message;
+}
+
+function validHexColor(value) {
+  const color = String(value || "").trim();
+  return /^#[0-9a-f]{6}$/i.test(color) ? color : "";
+}
+
+function applyTenantBranding(config = {}) {
+  const branding = config.branding || {};
+  const login = config.loginCustomization || {};
+  const primary = validHexColor(branding.primaryColor);
+  const accent = validHexColor(branding.accentColor);
+  const navy = validHexColor(branding.navyColor);
+  if (primary) document.documentElement.style.setProperty("--green", primary);
+  if (accent) document.documentElement.style.setProperty("--green-2", accent);
+  if (navy) document.documentElement.style.setProperty("--navy", navy);
+  if (branding.logoUrl && el.loginLogo) el.loginLogo.src = branding.logoUrl;
+  if (branding.logoUrl && el.sidebarLogo) el.sidebarLogo.src = branding.logoUrl;
+  if (login.title && el.loginTitle) el.loginTitle.textContent = login.title;
+  if (login.subtitle && el.loginSubtitle) el.loginSubtitle.textContent = login.subtitle;
+  if (login.note && el.loginNote) el.loginNote.textContent = login.note;
+  if (login.productName && el.sidebarBrandName) el.sidebarBrandName.textContent = login.productName;
+  if (login.tagline && el.sidebarBrandTagline) el.sidebarBrandTagline.textContent = login.tagline;
+  if (login.productName) document.title = `${login.productName} - Sistema`;
+}
+
+async function loadTenantBranding() {
+  if (!cloudEnabled() || !cloud()?.loadPublicTenantConfig) return;
+  try {
+    const config = await cloud().loadPublicTenantConfig();
+    if (config) applyTenantBranding(config);
+  } catch (error) {
+    console.warn("Tenant branding warning", error);
+  }
 }
 
 function currentUserLabel() {
@@ -901,6 +942,7 @@ async function enterSystem(email, password) {
     shouldReplaceDemoDb = isDemoDb(remoteDb);
     db = shouldReplaceDemoDb ? emptyDb() : { ...emptyDb(), ...remoteDb };
     syncCloudAiConfig();
+    applyTenantBranding(cloud().tenantInfo?.() || {});
     updateUserProfileButton();
     setCloudStatus(`Firebase conectado: ${loggedUser.email || "usuario autenticado"} em ${tenantStatusLabel()}.`);
     toast("Firebase conectado. Dados carregados.");
@@ -1011,6 +1053,7 @@ function init() {
   renderNav();
   bindEvents();
   updateLoginNumbers();
+  loadTenantBranding();
   setCloudStatus(cloudEnabled() ? "Firebase configurado. Entre para acessar." : "Firebase obrigatorio. Configure o projeto para entrar.");
 }
 

@@ -6,6 +6,10 @@ service firebase.storage {
       return request.auth != null;
     }
 
+    function isSuperAdmin() {
+      return signedIn() && request.auth.token.email == "steven.passos@computeck.com.br";
+    }
+
     function tenantPath(tenantId) {
       return /databases/(default)/documents/tenants/$(tenantId);
     }
@@ -18,6 +22,7 @@ service firebase.storage {
 
     function isMember(tenantId) {
       return signedIn() && (
+        isSuperAdmin() ||
         firestore.exists(/databases/(default)/documents/tenants/$(tenantId)/members/$(request.auth.uid)) ||
         emailAllowed(tenantId)
       );
