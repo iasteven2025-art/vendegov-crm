@@ -16,6 +16,7 @@
   let ai = null;
   let user = null;
   let libsPromise = null;
+  let runtimeAiSettings = {};
 
   function tenantId() {
     return settings.tenantId || "computeck-demo";
@@ -185,20 +186,51 @@
     return docRef.id;
   }
 
+  function setAiConfig(config = {}) {
+    runtimeAiSettings = { ...(config || {}) };
+    ai = null;
+  }
+
   function aiSettings() {
-    return settings.ai || {};
+    return { ...(settings.ai || {}), ...(runtimeAiSettings || {}) };
+  }
+
+  function aiProvider() {
+    return aiSettings().provider || "firebase-ai-logic";
+  }
+
+  function aiConnectionMode() {
+    const config = aiSettings();
+    if (config.connectionMode) return config.connectionMode;
+    if (aiProvider() === "firebase-ai-logic") return "firebase-ai-logic";
+    return config.apiKey ? "direct-api-key" : "secure-endpoint";
+  }
+
+  function aiApiKey() {
+    return aiSettings().apiKey || aiSettings().directApiKey || "";
   }
 
   function aiModelName() {
     return aiSettings().model || "gemini-3.6-flash";
   }
 
+  function aiEndpoint() {
+    return aiSettings().endpointUrl || aiSettings().endpoint || "";
+  }
+
   function aiEnabled() {
-    return configured && aiSettings().enabled !== false;
+    if (aiSettings().enabled === false) return false;
+    if (aiProvider() === "firebase-ai-logic" || aiConnectionMode() === "firebase-ai-logic") return configured;
+    if (supportsDirectAi()) return true;
+    return Boolean(aiEndpoint());
+  }
+
+  function supportsDirectAi() {
+    return aiConnectionMode() === "direct-api-key" && aiProvider() === "google-gemini" && Boolean(aiApiKey());
   }
 
   async function getAiModel() {
-    if (!aiEnabled()) throw new Error("IA nao configurada. Ative o Firebase AI Logic no projeto.");
+    if (!aiEnabled() || aiProvider() !== "firebase-ai-logic") throw new Error("IA nao configurada. Confira Parametros > IA.");
     const ctx = await init();
     const libs = await loadLibs();
     if (!ai) ai = libs.aiLib.getAI(ctx.app, { backend: new libs.aiLib.GoogleAIBackend() });
@@ -220,6 +252,85 @@
     };
   }
 
+  async function fileToBase64Payload(file) {
+    const data = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = () => reject(new Error("Nao foi possivel ler o arquivo."));
+      reader.onloadend = () => resolve(String(reader.result || "").split(",")[1] || "");
+      reader.readAsDataURL(file);
+    });
+    return {
+      name: file.name,
+      mimeType: file.type || "application/pdf",
+      size: file.size,
+      data,
+    };
+  }
+
+  async function customAiRequest(task, payload) {
+    const endpoint = aiEndpoint();
+    if (!endpoint) throw new Error("Endpoint seguro de IA nao configurado.");
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        task,
+        provider: aiProvider(),
+        model: aiModelName(),
+        tenantId: tenantId(),
+        payload,
+      }),
+    });
+    const text = await response.text();
+    if (!response.ok) throw new Error(text || "A IA retornou erro.");
+    try {
+      return JSON.parse(text);
+    } catch {
+      return { text };
+    }
+  }
+
+  async function directGeminiRequest(prompt, filePayload = null) {
+    const key = aiApiKey();
+    if (!key) throw new Error("Chave da API Gemini nao configurada.");
+    const model = encodeURIComponent(aiModelName());
+    const parts = [{ text: prompt }];
+    if (filePayload?.data) {
+      parts.push({
+        inlineData: {
+          mimeType: filePayload.mimeType || "application/pdf",
+          data: filePayload.data,
+        },
+      });
+    }
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ role: "user", parts }],
+        generationConfig: { temperature: 0.2 },
+      }),
+    });
+    const text = await response.text();
+    if (!response.ok) {
+      try {
+        const parsed = JSON.parse(text);
+        throw new Error(parsed.error?.message || "A API Gemini retornou erro.");
+      } catch (error) {
+        throw new Error(error.message || text || "A API Gemini retornou erro.");
+      }
+    }
+    const json = JSON.parse(text);
+    const answer = (json.candidates || [])
+      .flatMap((candidate) => candidate.content?.parts || [])
+      .map((part) => part.text || "")
+      .filter(Boolean)
+      .join("\n")
+      .trim();
+    if (!answer) throw new Error("A API Gemini nao retornou texto.");
+    return answer;
+  }
+
   function parseJsonResponse(text) {
     const clean = String(text || "").trim().replace(/^```(?:json)?/i, "").replace(/```$/i, "").trim();
     try {
@@ -234,8 +345,6 @@
   async function analyzeContractFile(file) {
     if (!file) throw new Error("Selecione um PDF de contrato.");
     if (file.size > 18 * 1024 * 1024) throw new Error("O PDF precisa ter ate 18 MB para analise direta.");
-    const model = await getAiModel();
-    const filePart = await fileToGenerativePart(file);
     const prompt = `
 Voce e um assistente juridico-operacional do VendeGov CRM para empresas que vendem ao governo.
 Leia o documento enviado e extraia os dados do contrato publico.
@@ -265,6 +374,23 @@ Responda somente JSON valido, sem markdown, neste formato:
   "resumo": ""
 }
 Use strings vazias quando uma informacao nao estiver no documento. Valores devem ser numero em reais, sem separador de milhar.`;
+    if (aiProvider() !== "firebase-ai-logic") {
+      if (supportsDirectAi()) {
+        const text = await directGeminiRequest(prompt, await fileToBase64Payload(file));
+        return parseJsonResponse(text);
+      }
+      if (aiConnectionMode() === "direct-api-key") {
+        throw new Error("Chamada direta com chave API esta disponivel para Google Gemini. Selecione Google Gemini API ou use endpoint seguro.");
+      }
+      const custom = await customAiRequest("analyzeContractFile", {
+        prompt,
+        file: await fileToBase64Payload(file),
+      });
+      const parsed = custom.result || custom.data || custom;
+      return typeof parsed === "string" ? parseJsonResponse(parsed) : parsed;
+    }
+    const model = await getAiModel();
+    const filePart = await fileToGenerativePart(file);
     const result = await model.generateContent([prompt, filePart]);
     const text = result.response.text() || "";
     return parseJsonResponse(text);
@@ -272,7 +398,6 @@ Use strings vazias quando uma informacao nao estiver no documento. Valores devem
 
   async function generateRenewalLetter(contract, renewal = {}) {
     if (!contract) throw new Error("Selecione um contrato.");
-    const model = await getAiModel();
     const prompt = `
 Voce e o assistente de renovacoes do VendeGov CRM.
 Gere uma carta profissional de renovacao contratual em portugues do Brasil, pronta para envio a uma empresa cliente.
@@ -285,6 +410,21 @@ ${JSON.stringify(contract, null, 2)}
 Dados da renovacao vinculada:
 ${JSON.stringify(renewal || {}, null, 2)}
 `;
+    if (aiProvider() !== "firebase-ai-logic") {
+      if (supportsDirectAi()) {
+        return directGeminiRequest(prompt);
+      }
+      if (aiConnectionMode() === "direct-api-key") {
+        throw new Error("Chamada direta com chave API esta disponivel para Google Gemini. Selecione Google Gemini API ou use endpoint seguro.");
+      }
+      const custom = await customAiRequest("generateRenewalLetter", {
+        prompt,
+        contract,
+        renewal,
+      });
+      return custom.text || custom.letter || custom.result || "";
+    }
+    const model = await getAiModel();
     const result = await model.generateContent(prompt);
     return result.response.text() || "";
   }
@@ -301,6 +441,7 @@ ${JSON.stringify(renewal || {}, null, 2)}
     saveDb,
     uploadFile,
     queueEmail,
+    setAiConfig,
     aiEnabled,
     aiModelName,
     analyzeContractFile,

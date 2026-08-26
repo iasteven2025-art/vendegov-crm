@@ -142,6 +142,16 @@ button {
   resize: vertical;
 }
 
+.field-preview {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.field-preview a {
+  color: var(--green-2);
+}
+
 .login-panel small {
   display: block;
   margin-top: 16px;
@@ -464,6 +474,35 @@ h3 {
   color: var(--paper);
   font-size: 11px;
   font-weight: 850;
+}
+
+.user-button img {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  object-fit: cover;
+}
+
+.record-media {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  min-width: 180px;
+}
+
+.record-media img,
+.record-media > span {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  background: #eaf8f2;
+  color: var(--green-2);
+  font-size: 11px;
+  font-weight: 850;
+  object-fit: contain;
 }
 
 .content {
@@ -1340,6 +1379,98 @@ h3 {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
+}
+
+.import-center {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.import-card {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr);
+  gap: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfcfd;
+  padding: 14px;
+}
+
+.import-card > span {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 8px;
+  background: var(--navy);
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.import-card h3 {
+  margin: 0 0 5px;
+}
+
+.import-card p {
+  margin: 0 0 12px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.ai-settings-panel {
+  display: grid;
+  gap: 14px;
+  margin-top: 16px;
+}
+
+.ai-settings-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfcfd;
+  padding: 14px;
+}
+
+.ai-settings-form label {
+  display: grid;
+  gap: 7px;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.ai-settings-form input,
+.ai-settings-form select,
+.ai-settings-form textarea {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper);
+  color: var(--ink);
+  outline: 0;
+}
+
+.ai-settings-form input,
+.ai-settings-form select {
+  height: 42px;
+  padding: 0 12px;
+}
+
+.ai-settings-form textarea {
+  min-height: 86px;
+  padding: 12px;
+  resize: vertical;
+}
+
+.ai-settings-form .wide {
+  grid-column: 1 / -1;
 }
 
 .table-panel {
@@ -2698,6 +2829,305 @@ h3 {
   text-align: center;
 }
 
+/* Modernizacao visual VendeGov */
+body {
+  background:
+    linear-gradient(180deg, #f8fafc 0%, #eef3f7 100%);
+}
+
+.login-screen {
+  background:
+    linear-gradient(135deg, #ffffff 0%, #f4f8fb 45%, #edf5f2 100%);
+}
+
+.login-panel {
+  border-right: 1px solid #d9e3ec;
+}
+
+.login-panel h1 {
+  max-width: 640px;
+  font-size: clamp(38px, 4.4vw, 60px);
+  letter-spacing: 0;
+}
+
+.login-panel p {
+  font-size: 18px;
+}
+
+.aside-card,
+.panel,
+.metric-card,
+.table-panel,
+.module-card,
+.kanban-column,
+.config-card,
+.overview-kpi,
+.overview-card,
+.renewal-kpi,
+.ai-action,
+.import-card,
+.ai-settings-form,
+.ai-contract-preview,
+.ai-result {
+  border-color: #dfe7ef;
+  box-shadow: 0 14px 34px rgba(13, 31, 48, 0.07);
+}
+
+.app-shell {
+  grid-template-columns: 278px minmax(0, 1fr);
+}
+
+.sidebar {
+  border-right: 0;
+  background: #071b2d;
+  color: #dbe7f1;
+  box-shadow: 18px 0 40px rgba(7, 27, 45, 0.13);
+}
+
+.brand {
+  border-bottom-color: rgba(255, 255, 255, 0.08);
+}
+
+.brand strong {
+  color: #ffffff;
+}
+
+.brand span,
+.sidebar-summary span,
+.sidebar-summary small {
+  color: #9eb0c2;
+}
+
+.nav-group {
+  color: #7f95aa;
+}
+
+.nav-item {
+  color: #cbd8e5;
+}
+
+.nav-item:hover,
+.nav-item:focus-visible {
+  border-color: rgba(39, 197, 130, 0.24);
+  background: rgba(255, 255, 255, 0.06);
+  color: #ffffff;
+}
+
+.nav-item.active {
+  border-color: rgba(39, 197, 130, 0.45);
+  background: #113324;
+  color: #ffffff;
+}
+
+.nav-code {
+  background: rgba(255, 255, 255, 0.08);
+  color: #9eb0c2;
+}
+
+.nav-item.active .nav-code {
+  background: #27c582;
+  color: #061b12;
+}
+
+.sidebar-summary {
+  border-color: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.sidebar-summary strong {
+  color: #ffffff;
+}
+
+.main {
+  padding: 22px 28px 34px;
+}
+
+.topbar {
+  margin: -22px -28px 24px;
+  border-bottom-color: #dfe7ef;
+  background: rgba(248, 250, 252, 0.9);
+  padding: 20px 28px;
+}
+
+h1 {
+  font-size: 28px;
+}
+
+h2 {
+  font-size: 21px;
+}
+
+.search-box,
+.login-form input,
+.record-form input,
+.record-form select,
+.record-form textarea,
+.ai-upload input,
+.ai-upload select,
+.ai-settings-form input,
+.ai-settings-form select,
+.ai-settings-form textarea,
+.renewal-result-select {
+  border-color: #d6e1eb;
+  background: #ffffff;
+}
+
+.primary-button {
+  border-color: #17a96b;
+  background: #20b978;
+  color: #061d13;
+  box-shadow: 0 8px 18px rgba(32, 185, 120, 0.22);
+}
+
+.primary-button:hover {
+  border-color: #159760;
+  background: #18a96c;
+}
+
+.secondary-button,
+.user-button,
+.mini-button,
+.letter-action {
+  border-color: #d8e3ec;
+  background: #ffffff;
+  color: #0b1f33;
+}
+
+.secondary-button:hover,
+.mini-button:hover,
+.letter-action:hover {
+  background: #f4f8fb;
+  border-color: #c9d8e5;
+}
+
+.danger-button {
+  box-shadow: 0 8px 18px rgba(210, 75, 75, 0.18);
+}
+
+.overview-head h2 {
+  font-size: 31px;
+}
+
+.overview-head p,
+.overview-card-title p,
+.panel-header p,
+.table-toolbar p {
+  color: #61748a;
+}
+
+.overview-kpi {
+  min-height: 128px;
+  padding: 22px;
+}
+
+.overview-kpi::after {
+  background: #f0f5f9;
+}
+
+.overview-kpi b,
+.overview-card-head b,
+.automation-step span,
+.import-card > span {
+  background: #0b1f33;
+}
+
+.overview-card,
+.table-panel,
+.panel {
+  background: rgba(255, 255, 255, 0.96);
+}
+
+.overview-alert {
+  border-color: #f6d780;
+  background: #fff8e6;
+}
+
+.renewal-tabs {
+  background: #e9f0f6;
+}
+
+.renewal-tabs button.active {
+  box-shadow: 0 8px 20px rgba(13, 31, 48, 0.12);
+}
+
+.data-table {
+  border-collapse: separate;
+  border-spacing: 0;
+  width: 100%;
+}
+
+.data-table thead th {
+  border-bottom: 1px solid #dfe7ef;
+  background: #f7fafc;
+  color: #52667a;
+  font-size: 12px;
+  font-weight: 850;
+  text-align: left;
+  text-transform: uppercase;
+}
+
+.data-table tbody tr {
+  transition: background 0.16s ease;
+}
+
+.data-table tbody tr:hover {
+  background: #f8fbfd;
+}
+
+.data-table td,
+.data-table th {
+  padding: 14px 16px;
+}
+
+.record-title {
+  color: #071b2d;
+  font-weight: 850;
+}
+
+.record-subtitle {
+  color: #6b7f93;
+}
+
+.status {
+  box-shadow: inset 0 0 0 1px rgba(11, 31, 51, 0.04);
+}
+
+.modal-card,
+.drawer,
+.confirm-card,
+.letter-modal {
+  border-color: #d9e4ee;
+  box-shadow: 0 28px 80px rgba(7, 27, 45, 0.22);
+}
+
+.modal-header,
+.drawer-header,
+.letter-modal-head {
+  background: #ffffff;
+}
+
+.contract-ai-scan {
+  border-color: #bfe8d8;
+  background: #f2fbf7;
+}
+
+.client-hero {
+  background: #071b2d;
+}
+
+.client-icon {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.client-metrics {
+  box-shadow: 0 14px 34px rgba(13, 31, 48, 0.06);
+}
+
+.toast {
+  background: #071b2d;
+  box-shadow: 0 22px 60px rgba(7, 27, 45, 0.28);
+}
+
 @media (max-width: 1180px) {
   .app-shell {
     grid-template-columns: 84px minmax(0, 1fr);
@@ -2723,13 +3153,15 @@ h3 {
   .overview-performance,
   .kanban,
   .module-grid,
+  .import-center,
   .ai-flow {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .grid-2,
   .report-grid,
-  .config-grid {
+  .config-grid,
+  .ai-settings-form {
     grid-template-columns: 1fr;
   }
 }
@@ -2803,7 +3235,9 @@ h3 {
   .legal-monitor-grid,
   .kanban,
   .module-grid,
+  .import-center,
   .ai-flow,
+  .ai-settings-form,
   .record-form,
   .detail-grid {
     grid-template-columns: 1fr;

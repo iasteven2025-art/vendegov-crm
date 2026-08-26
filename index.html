@@ -6,7 +6,7 @@
     <title>VendeGov CRM - Sistema</title>
     <meta name="description" content="Sistema VendeGov CRM para empresas que vendem ao governo." />
     <link rel="icon" href="./assets/vendegov-crm-simbolo.svg" />
-    <link rel="stylesheet" href="./styles.css?v=20260824-login-recovery" />
+    <link rel="stylesheet" href="./styles.css?v=20260825-consultor-ui-scope" />
   </head>
   <body>
     <section class="login-screen" id="loginScreen">
@@ -73,8 +73,6 @@
               <span>Buscar</span>
               <input id="globalSearch" type="search" placeholder="cliente, edital, contrato..." />
             </label>
-            <button class="secondary-button" id="importButton" type="button">Importar</button>
-            <button class="secondary-button" id="exportButton" type="button">Exportar</button>
             <button class="primary-button" id="newButton" type="button">Novo</button>
             <button class="user-button" id="logoutButton" type="button" title="Sair">
               <span>SP</span>
@@ -134,11 +132,11 @@
             <p class="eyebrow">Confirmacao</p>
             <h2 id="confirmTitle">Remover registro?</h2>
           </div>
+          <button class="icon-button quiet" id="closeConfirm" type="button" aria-label="Fechar">x</button>
         </header>
         <div class="confirm-body">
           <p id="confirmText">Esta acao remove o registro da base do Firebase.</p>
           <div class="confirm-actions">
-            <button class="secondary-button" id="cancelDelete" type="button">Cancelar</button>
             <button class="danger-button" id="confirmDelete" type="button">Remover</button>
           </div>
         </div>
@@ -148,7 +146,7 @@
     <input id="importFile" type="file" accept=".json,.csv,application/json,text/csv" hidden />
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
     <script src="./firebase-config.js?v=20260824-firestore-safe-login"></script>
-    <script src="./firebase-adapter.js?v=20260824-firestore-safe-login"></script>
-    <script src="./app.js?v=20260824-firestore-safe-login"></script>
+    <script src="./firebase-adapter.js?v=20260825-consultor-ui-scope"></script>
+    <script src="./app.js?v=20260825-consultor-ui-scope"></script>
   </body>
 </html>
