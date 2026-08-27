@@ -107,7 +107,7 @@ const schemas = {
       field("agencyType", "Tipo de orgao", "text"),
       field("value", "Valor total", "number"),
       field("monthly", "Receita mensal", "number"),
-      field("status", "Status", "select", true, [["green", "Ativo"], ["cyan", "Reajuste"], ["yellow", "Renovacao"], ["red", "Risco"]]),
+      field("status", "Status", "select", true, [["green", "Ativo"], ["cyan", "Reajuste"], ["yellow", "Renovacao"], ["red", "Risco"], ["closed", "Encerrado"]]),
       field("start", "Inicio", "date"),
       field("end", "Fim", "date"),
       field("renewal", "Renovacao prevista", "date"),
@@ -377,6 +377,7 @@ const state = {
   status: "todos",
   configTab: "usuarios",
   editing: null,
+  newContractDefaults: null,
   deleteTarget: null,
   clientDetailId: "",
   clientTab: "contratos",
@@ -1081,7 +1082,11 @@ function bindEvents() {
     state.query = event.target.value.trim().toLowerCase();
     render();
   });
-  el.newButton.addEventListener("click", () => openForm(activeCrudModule()));
+  el.newButton.addEventListener("click", () => {
+    const moduleKey = activeCrudModule();
+    if (moduleKey === "contratos") return openNewContractPage();
+    return openForm(moduleKey);
+  });
   el.closeModal.addEventListener("click", closeForm);
   el.closeLetterModal.addEventListener("click", closeLetterModal);
   el.letterModal.addEventListener("click", handleLetterModalClick);
@@ -1127,9 +1132,10 @@ function render() {
   const meta = viewMeta(state.view);
   el.title.textContent = meta.title;
   el.kicker.textContent = meta.kicker;
-  el.newButton.disabled = ["dashboard", "relatorios", "cliente"].includes(state.view);
+  el.newButton.disabled = ["dashboard", "relatorios", "cliente", "novoContrato"].includes(state.view);
   if (state.view === "dashboard") return renderDashboard();
   if (state.view === "cliente") return renderClientDetail();
+  if (state.view === "novoContrato") return renderNewContractPage();
   if (state.view === "renovacoes") return renderRenewals();
   if (state.view === "relatorios") return renderReports();
   if (state.view === "configuracoes") return renderSettings();
@@ -1139,6 +1145,7 @@ function render() {
 function viewMeta(view) {
   if (view === "dashboard") return { title: "Visao Geral", kicker: "Contratos e renovacoes" };
   if (view === "cliente") return { title: "Ficha do cliente", kicker: "Carteira" };
+  if (view === "novoContrato") return { title: "Novo contrato", kicker: "Contratos" };
   if (view === "renovacoes") return { title: "Renovacoes de Contratos", kicker: "Acompanhamento" };
   if (view === "relatorios") return { title: "Relatorios", kicker: "Vendas, gestao e comissoes" };
   if (view === "configuracoes") return { title: "Parametrizacao", kicker: "Administracao" };
@@ -2844,6 +2851,7 @@ function openClientLinkedForm(moduleKey, clientId) {
   const client = visibleDbRows("clientes").find((item) => item.id === clientId);
   if (!client) return;
   const defaults = linkedDefaults(moduleKey, client);
+  if (moduleKey === "contratos") return openNewContractPage(defaults);
   openForm(moduleKey, null, defaults);
 }
 
@@ -3341,9 +3349,14 @@ function simpleTable(headers, rows) {
     .join("")}</tbody></table>`;
 }
 
+function openCreateRecord(moduleKey) {
+  if (moduleKey === "contratos") return openNewContractPage();
+  return openForm(moduleKey);
+}
+
 function bindDynamicActions() {
   document.querySelectorAll("[data-jump]").forEach((button) => button.addEventListener("click", () => setView(button.dataset.jump)));
-  document.querySelectorAll("[data-add]").forEach((button) => button.addEventListener("click", () => openForm(button.dataset.add)));
+  document.querySelectorAll("[data-add]").forEach((button) => button.addEventListener("click", () => openCreateRecord(button.dataset.add)));
   document.querySelectorAll("[data-open]").forEach((button) => button.addEventListener("click", () => {
     if (button.dataset.module === "clientes") return openClientDetail(button.dataset.open);
     openDetail(button.dataset.module, button.dataset.open);
@@ -3419,6 +3432,7 @@ function bindDynamicActions() {
   }));
   const aiConfigForm = document.querySelector("#aiConfigForm");
   if (aiConfigForm) aiConfigForm.addEventListener("submit", saveAiConfigForm);
+  bindNewContractPageForm();
 }
 
 function startImport(mode, accept) {
@@ -3891,6 +3905,300 @@ function renewalMailtoLink(renewal) {
   return `mailto:${encodeURIComponent(recipient)}?${params.join("&")}`;
 }
 
+function openNewContractPage(defaults = {}) {
+  if (!canAccessModule("contratos")) {
+    toast("Seu perfil nao tem acesso a este modulo.");
+    return;
+  }
+  if (planLimitReached("contratos")) {
+    toast(planLimitMessage("contratos"));
+    return;
+  }
+  closeDrawer();
+  closeForm();
+  state.newContractDefaults = newContractDefaults(defaults);
+  state.editing = { moduleKey: "contratos", id: null };
+  state.contractFormAiBusy = false;
+  state.contractFormAiFile = null;
+  state.contractFormAiExtraction = null;
+  setView("novoContrato");
+}
+
+function renderNewContractPage() {
+  if (!state.editing || state.editing.moduleKey !== "contratos" || state.editing.id) {
+    state.editing = { moduleKey: "contratos", id: null };
+  }
+  const values = newContractDefaults(state.newContractDefaults || {});
+  state.newContractDefaults = values;
+  el.content.innerHTML = NovoContratoPage(values);
+  bindDynamicActions();
+}
+
+function NovoContratoPage(values = {}) {
+  return `
+    <section class="new-contract-page" aria-labelledby="novo-contrato-title">
+      <header class="new-contract-page-header">
+        <div>
+          <span class="eyebrow">Contratos</span>
+          <h2 id="novo-contrato-title">Novo Contrato</h2>
+          <p>Cadastre o contrato com dados juridicos, vigencia, valores e PDF em uma pagina dedicada.</p>
+        </div>
+        <button class="secondary-button" data-new-contract-cancel type="button">Cancelar</button>
+      </header>
+      <form id="newContractPageForm" class="new-contract-form">
+        ${newContractAiCard()}
+        ${newContractCard("dados-principais", "Dados Principais", "Identificacao comercial e operacional do contrato.", `
+          <div class="new-contract-grid two-columns">
+            ${newContractInput("name", "Contrato", values.name, { required: true, placeholder: "Ex: CT-2026/001" })}
+            ${newContractClientField(values.client)}
+            ${newContractInput("agency", "Orgao comprador", values.agency, { placeholder: "Nome do orgao publico" })}
+            ${newContractCompanyField(values.responsibleCompany)}
+            ${newContractTextarea("object", "Objeto do Contrato", values.object, { className: "span-2", rows: 4, placeholder: "Descreva o objeto contratado" })}
+            ${newContractStatusField(values.status)}
+            ${newContractOwnerField(values.owner)}
+          </div>
+        `)}
+        ${newContractCard("fundamentacao-vigencia", "Fundamentacao e Vigencia", "Registre a base legal, prazos e controles de renovacao.", `
+          <div class="new-contract-grid three-columns">
+            ${newContractInput("legalBasis", "Fundamento legal", values.legalBasis, { placeholder: "Artigo, clausula ou base legal" })}
+            ${newContractSelect("legalRegime", "Regime legal", contractSchemaOptions("legalRegime"), values.legalRegime)}
+            ${newContractSelect("contractNature", "Natureza para vigencia", contractSchemaOptions("contractNature"), values.contractNature)}
+            ${newContractSelect("prorrogable", "Permite prorrogacao/aditivo?", contractSchemaOptions("prorrogable"), values.prorrogable)}
+            ${newContractInput("start", "Inicio", values.start, { type: "date" })}
+            ${newContractInput("end", "Fim", values.end, { type: "date" })}
+            ${newContractInput("renewal", "Renovacao prevista", values.renewal, { type: "date" })}
+            ${newContractInput("maxTermMonths", "Prazo maximo legal estimado (meses)", values.maxTermMonths, { type: "number", min: 0 })}
+            ${newContractInput("renewalAlertDays", "Alerta antes do vencimento (dias)", values.renewalAlertDays, { type: "number", min: 0 })}
+          </div>
+        `)}
+        ${newContractCard("valores-adicionais", "Valores e Informacoes Adicionais", "Consolide receita, reajuste, classificacao e observacoes internas.", `
+          <div class="new-contract-grid two-columns">
+            ${newContractInput("value", "Valor total (R$)", values.value, { type: "number", min: 0, step: "0.01", inputmode: "decimal" })}
+            ${newContractInput("monthly", "Receita mensal (R$)", values.monthly, { type: "number", min: 0, step: "0.01", inputmode: "decimal" })}
+            ${newContractInput("adjustment", "Indice/reajuste", values.adjustment, { placeholder: "Ex: IPCA, INPC, IGP-M" })}
+            ${newContractInput("addendumCount", "Aditivos realizados", values.addendumCount, { type: "number", min: 0 })}
+            ${newContractInput("region", "Regiao", values.region, { placeholder: "Ex: Vale do Rio Doce" })}
+            ${newContractInput("agencyType", "Tipo de orgao", values.agencyType, { placeholder: "Ex: Prefeitura, Camara, Autarquia" })}
+            ${newContractTextarea("notes", "Observacoes", values.notes, { className: "span-2", rows: 4 })}
+          </div>
+        `)}
+        ${newContractCard("documentos", "Documentos", "Envie o PDF para o VendeGov e mantenha as referencias tecnicas do arquivo.", `
+          <div class="new-contract-grid two-columns">
+            <label class="new-contract-field span-2 new-contract-upload">
+              <span>Enviar PDF para o sistema</span>
+              <input name="attachment" type="file" accept="application/pdf,.pdf" />
+              <small>O arquivo sera salvo no Firebase Storage ao salvar o contrato.</small>
+            </label>
+            ${newContractInput("fileRef", "Nome do PDF na plataforma", values.fileRef, { readonly: true, placeholder: "Preenchido automaticamente apos selecionar o arquivo" })}
+            ${newContractInput("sourceId", "ID origem", values.sourceId, { readonly: true, placeholder: "Referencia tecnica de importacao" })}
+            ${newContractInput("fileUrl", "PDF salvo no VendeGov", values.fileUrl, { readonly: true, placeholder: "Gerado apos upload" })}
+            ${newContractInput("documentUrl", "PDF origem", values.documentUrl, { readonly: true, placeholder: "Link externo quando importado" })}
+          </div>
+        `)}
+        <footer class="new-contract-footer" aria-label="Acoes do cadastro">
+          <button class="secondary-button" data-new-contract-cancel type="button">Cancelar</button>
+          <button class="primary-button new-contract-save" type="submit">Salvar Contrato</button>
+        </footer>
+      </form>
+    </section>`;
+}
+
+function newContractDefaults(defaults = {}) {
+  const values = {
+    name: "",
+    client: "",
+    agency: "",
+    responsibleCompany: defaultResponsibleCompanyName(),
+    object: "",
+    legalBasis: "",
+    legalRegime: "Lei 14.133/2021",
+    contractNature: "Servicos continuos",
+    prorrogable: "Sim",
+    maxTermMonths: 120,
+    renewalAlertDays: 60,
+    addendumCount: 0,
+    region: "",
+    agencyType: "",
+    value: "",
+    monthly: "",
+    status: "green",
+    start: "",
+    end: "",
+    renewal: "",
+    adjustment: "",
+    attachment: "",
+    fileRef: "",
+    fileUrl: "",
+    documentUrl: "",
+    sourceId: "",
+    owner: currentUserLabel() || "Steven Passos",
+    notes: "",
+    ...defaults,
+  };
+  if (!values.responsibleCompany) values.responsibleCompany = defaultResponsibleCompanyName();
+  return applyUserScopeDefaults("contratos", values);
+}
+
+function newContractAiCard() {
+  const aiOnline = cloudEnabled() && Boolean(cloud()?.analyzeContractFile);
+  const status = aiOnline
+    ? "Envie o PDF do contrato e confira os campos preenchidos antes de salvar."
+    : "Configure a IA em Parametros para liberar a leitura automatica de PDFs.";
+  return `
+    <section class="new-contract-card new-contract-ai-card" aria-labelledby="new-contract-ai-title" data-contract-ai-card>
+      <div class="new-contract-ai-mark" aria-hidden="true">IA</div>
+      <div class="new-contract-ai-copy">
+        <h3 id="new-contract-ai-title">Inteligencia Artificial</h3>
+        <p>Escaneie o contrato para preencher automaticamente numero, cliente, orgao, objeto, valores, vigencia, reajuste e observacoes.</p>
+        <div class="contract-ai-status" id="contractAiScanStatus">${escapeHtml(status)}</div>
+      </div>
+      <input class="hidden" id="contractAiScanFile" type="file" accept="application/pdf,.pdf,text/plain,.txt" />
+      <button class="primary-button new-contract-ai-button" data-contract-ai-scan type="button" ${aiOnline ? "" : "disabled"}>Escanear contrato com IA</button>
+    </section>`;
+}
+
+function newContractCard(id, title, description, body) {
+  return `
+    <section class="new-contract-card" aria-labelledby="${id}-title">
+      <header class="new-contract-card-header">
+        <div>
+          <h3 id="${id}-title">${escapeHtml(title)}</h3>
+          <p>${escapeHtml(description)}</p>
+        </div>
+      </header>
+      ${body}
+    </section>`;
+}
+
+function newContractInput(name, label, value, options = {}) {
+  const type = options.type || "text";
+  const attrs = [
+    `name="${escapeAttr(name)}"`,
+    `type="${escapeAttr(type)}"`,
+    `value="${escapeAttr(formValue(value))}"`,
+    options.required ? "required" : "",
+    options.readonly ? "readonly" : "",
+    options.placeholder ? `placeholder="${escapeAttr(options.placeholder)}"` : "",
+    options.min !== undefined ? `min="${escapeAttr(options.min)}"` : "",
+    options.step !== undefined ? `step="${escapeAttr(options.step)}"` : "",
+    options.inputmode ? `inputmode="${escapeAttr(options.inputmode)}"` : "",
+  ].filter(Boolean).join(" ");
+  return `<label class="new-contract-field ${escapeAttr(options.className || "")}"><span>${escapeHtml(label)}</span><input ${attrs} /></label>`;
+}
+
+function newContractTextarea(name, label, value, options = {}) {
+  const attrs = [
+    `name="${escapeAttr(name)}"`,
+    options.required ? "required" : "",
+    options.rows ? `rows="${escapeAttr(options.rows)}"` : "",
+    options.placeholder ? `placeholder="${escapeAttr(options.placeholder)}"` : "",
+  ].filter(Boolean).join(" ");
+  return `<label class="new-contract-field ${escapeAttr(options.className || "")}"><span>${escapeHtml(label)}</span><textarea ${attrs}>${escapeHtml(formValue(value))}</textarea></label>`;
+}
+
+function newContractSelect(name, label, options, value, extraClass = "") {
+  return `
+    <label class="new-contract-field ${escapeAttr(extraClass)}">
+      <span>${escapeHtml(label)}</span>
+      <select name="${escapeAttr(name)}">${newContractSelectOptions(options, value)}</select>
+    </label>`;
+}
+
+function newContractClientField(value) {
+  const clients = visibleDbRows("clientes").map((client) => client.name).filter(Boolean);
+  const options = [...new Set(clients)].map((client) => `<option value="${escapeAttr(client)}"></option>`).join("");
+  return `
+    <label class="new-contract-field">
+      <span>Cliente</span>
+      <input name="client" type="search" list="newContractClientOptions" value="${escapeAttr(formValue(value))}" placeholder="Busque ou digite um novo cliente" required />
+      <datalist id="newContractClientOptions">${options}</datalist>
+    </label>`;
+}
+
+function newContractCompanyField(value) {
+  return newContractSelect("responsibleCompany", "Empresa Responsavel", companySelectOptions(value), value || defaultResponsibleCompanyName());
+}
+
+function newContractOwnerField(value) {
+  return newContractSelect("owner", "Responsavel", ownerSelectOptions(value), value || currentUserLabel());
+}
+
+function newContractStatusField(value) {
+  return newContractSelect("status", "Status", [["green", "Ativo"], ["yellow", "Em renovacao"], ["red", "Em risco"], ["cyan", "Em reajuste"], ["closed", "Encerrado"]], value || "green");
+}
+
+function companySelectOptions(selected = "") {
+  const companies = visibleDbRows("empresas").map((company) => company.name).filter(Boolean);
+  return [...new Set([defaultResponsibleCompanyName(), ...companies, selected].filter(Boolean))];
+}
+
+function ownerSelectOptions(selected = "") {
+  const schemaOptions = contractSchemaOptions("owner");
+  return [...new Set([currentUserLabel(), ...schemaOptions, selected].filter(Boolean))];
+}
+
+function contractSchemaOptions(fieldName) {
+  return (schemas.contratos.fields.find((fieldDef) => fieldDef.name === fieldName)?.options || []).map((option) => (Array.isArray(option) ? option[0] : option));
+}
+
+function newContractSelectOptions(options, selected = "") {
+  const normalized = (options || []).map((option) => {
+    const value = Array.isArray(option) ? option[0] : option;
+    const label = Array.isArray(option) ? option[1] : option;
+    return [String(value ?? ""), String(label ?? value ?? "")];
+  });
+  if (selected && !normalized.some(([value]) => String(value) === String(selected))) normalized.unshift([String(selected), String(selected)]);
+  return normalized.map(([value, label]) => `<option value="${escapeAttr(value)}" ${String(value) === String(selected) ? "selected" : ""}>${escapeHtml(label)}</option>`).join("");
+}
+
+function defaultResponsibleCompanyName() {
+  const computeck = (db.empresas || []).find((company) => normalizeText(company.name).includes("computeck"));
+  return computeck?.name || "Computeck Solucoes Inteligentes";
+}
+
+function formValue(value) {
+  return value === undefined || value === null ? "" : value;
+}
+
+function bindNewContractPageForm() {
+  const form = document.querySelector("#newContractPageForm");
+  const page = document.querySelector(".new-contract-page");
+  if (!form || form.dataset.bound === "true") return;
+  form.dataset.bound = "true";
+  form.addEventListener("submit", submitForm);
+  (page || form).querySelectorAll("[data-new-contract-cancel]").forEach((button) => button.addEventListener("click", cancelNewContractPage));
+  const scanButton = form.querySelector("[data-contract-ai-scan]");
+  const scanInput = form.querySelector("#contractAiScanFile");
+  if (scanButton && scanInput) {
+    scanButton.addEventListener("click", () => scanInput.click());
+    scanInput.addEventListener("change", () => {
+      const file = scanInput.files?.[0];
+      if (file) scanContractIntoForm(file);
+    });
+  }
+  const attachment = form.elements.attachment;
+  const fileRef = form.elements.fileRef;
+  if (attachment && fileRef) {
+    attachment.addEventListener("change", () => {
+      const file = attachment.files?.[0];
+      if (file) fileRef.value = file.name;
+    });
+  }
+}
+
+function cancelNewContractPage() {
+  state.editing = null;
+  state.newContractDefaults = null;
+  state.contractFormAiBusy = false;
+  state.contractFormAiFile = null;
+  state.contractFormAiExtraction = null;
+  setView("contratos");
+}
+
+function activeContractForm() {
+  return document.querySelector("#newContractPageForm") || el.form;
+}
+
 function openForm(moduleKey, id = null, defaults = {}) {
   const schema = schemas[moduleKey];
   if (!schema) return;
@@ -3973,8 +4281,9 @@ async function scanContractIntoForm(file) {
     toast("Firebase AI Logic ainda nao esta configurado.");
     return;
   }
-  const button = el.form.querySelector("[data-contract-ai-scan]");
-  const status = el.form.querySelector("#contractAiScanStatus");
+  const form = activeContractForm();
+  const button = form.querySelector("[data-contract-ai-scan]");
+  const status = form.querySelector("#contractAiScanStatus");
   state.contractFormAiBusy = true;
   if (button) {
     button.disabled = true;
@@ -4007,6 +4316,7 @@ async function scanContractIntoForm(file) {
 }
 
 function fillContractFormFromAi(contract, fileName) {
+  const form = activeContractForm();
   const values = {
     name: contract.name,
     client: contract.client,
@@ -4034,7 +4344,7 @@ function fillContractFormFromAi(contract, fileName) {
     notes: contract.notes,
   };
   Object.entries(values).forEach(([name, value]) => {
-    const fieldEl = el.form.elements[name];
+    const fieldEl = form.elements[name];
     if (!fieldEl || fieldEl.type === "file") return;
     fieldEl.value = value ?? "";
     fieldEl.dispatchEvent(new Event("input", { bubbles: true }));
@@ -4043,7 +4353,7 @@ function fillContractFormFromAi(contract, fileName) {
 }
 
 function setContractAiFormStatus(title, text) {
-  const status = el.form.querySelector("#contractAiScanStatus");
+  const status = activeContractForm().querySelector("#contractAiScanStatus");
   if (!status) return;
   status.classList.remove("is-error");
   status.innerHTML = `<strong>${escapeHtml(title)}</strong><span>${escapeHtml(text)}</span>`;
@@ -4086,7 +4396,9 @@ async function submitForm(event) {
     toast(planLimitMessage(moduleKey));
     return;
   }
-  const formData = new FormData(el.form);
+  const sourceForm = event.currentTarget || event.target || el.form;
+  const isDedicatedContractPage = sourceForm.id === "newContractPageForm";
+  const formData = new FormData(sourceForm);
   const values = {};
   const pendingUploads = [];
   schemas[moduleKey].fields.forEach((f) => {
@@ -4158,8 +4470,17 @@ async function submitForm(event) {
     updateUserProfileButton();
     toast("Registro criado.");
   }
-  closeForm();
   updateLoginNumbers();
+  if (isDedicatedContractPage) {
+    state.editing = null;
+    state.newContractDefaults = null;
+    state.contractFormAiBusy = false;
+    state.contractFormAiFile = null;
+    state.contractFormAiExtraction = null;
+    setView("contratos");
+    return;
+  }
+  closeForm();
   render();
 }
 
@@ -5048,6 +5369,7 @@ function badge(status) {
     cyan: "Em analise",
     yellow: "Atencao",
     red: "Risco",
+    closed: "Encerrado",
   }[status] || status || "-";
   return `<span class="status status-${status || "cyan"}">${label}</span>`;
 }
