@@ -1,6 +1,6 @@
-# VendeGov CRM - Deploy com GitHub e Firebase
+# GestãoGOV! - Deploy com GitHub e Firebase
 
-Esta pasta e a base pronta para transformar o VendeGov CRM em um sistema online.
+Esta pasta e a base pronta para transformar o GestãoGOV! em um sistema online.
 
 ## O que ja esta preparado
 
@@ -10,7 +10,10 @@ Esta pasta e a base pronta para transformar o VendeGov CRM em um sistema online.
 - Cloud Storage para anexos do modulo Entrega de Documentos.
 - Regras de seguranca para separar dados por empresa/tenant.
 - GitHub Actions para publicar automaticamente no Firebase Hosting.
-- Modo local de seguranca enquanto o Firebase ainda nao estiver configurado.
+- Estrutura SaaS multi-tenant em `tenants/{tenantId}`.
+- Provisionamento de novos grupos em `provisionar.html`.
+- Colecoes normalizadas por tenant para evoluir alem do snapshot inicial.
+- Snapshot legado mantido apenas como compatibilidade/migracao.
 
 ## 1. Criar o projeto no Firebase
 
@@ -107,11 +110,33 @@ FIREBASE_SERVICE_ACCOUNT_VENDEGOV_CRM
 
 Se o Firebase criar outro nome de segredo, ajuste os workflows.
 
-## Observacao importante sobre escala
+## Modelo SaaS multi-tenant
 
-Nesta primeira versao funcional, o sistema salva a base principal como um snapshot no Firestore. Isso e rapido para colocar o MVP online e validar com empresas.
+O GestãoGOV! usa tenants por grupo de empresas. Cada cliente/grupo acessa uma URL com identificador proprio:
 
-Quando entrar em producao com varios clientes e muitos registros, a evolucao recomendada e separar cada modulo em colecoes proprias:
+```text
+https://SEU_DOMINIO/?tenant=grupo-actcon
+```
+
+O superadmin `steven.passos@computeck.com.br` pode criar novos tenants pela tela:
+
+```text
+https://SEU_DOMINIO/provisionar.html
+```
+
+A tela de provisionamento cria:
+
+- grupo/tenant;
+- plano contratado e limites de usuarios/empresas;
+- identidade visual e tela de login;
+- primeira empresa interna;
+- usuario administrador do grupo;
+- snapshot inicial;
+- colecoes SaaS normalizadas.
+
+## Colecoes por tenant
+
+O sistema ainda mantem `tenants/{tenantId}/snapshots/main` para compatibilidade, mas a evolucao principal esta em colecoes:
 
 - clientes
 - licitacoes
@@ -122,4 +147,10 @@ Quando entrar em producao com varios clientes e muitos registros, a evolucao rec
 - comissoes
 - auditoria
 
-Essa evolucao melhora performance, filtros, permissoes finas e relatorios em grande volume.
+Para ativar em um tenant existente, entre como administrador e execute:
+
+```text
+Parametros > Importacao > Migrar para colecoes SaaS
+```
+
+Depois da migracao, os registros passam a carregar de `tenants/{tenantId}/{colecao}/{registroId}` quando `dataMode` estiver como `collections`.

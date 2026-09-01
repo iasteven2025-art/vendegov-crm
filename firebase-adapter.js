@@ -62,6 +62,38 @@
     return ["tenants", tenantId(), "snapshots", "main"];
   }
 
+  function dataModel() {
+    return window.GestaoGovDataModel || null;
+  }
+
+  function collectionName(collectionKey) {
+    return dataModel()?.collectionName?.(collectionKey) || collectionKey;
+  }
+
+  function snapshotKey(collectionKey) {
+    return dataModel()?.snapshotKey?.(collectionKey) || collectionKey;
+  }
+
+  function tenantCollectionPath(collectionKey, targetTenantId = tenantId()) {
+    return ["tenants", normalizeTenantId(targetTenantId) || tenantId(), collectionName(collectionKey)];
+  }
+
+  function normalizedDocId(value) {
+    return String(value || "")
+      .trim()
+      .replace(/[\/#?[\\\]]+/g, "-")
+      .replace(/\s+/g, "-")
+      .slice(0, 120);
+  }
+
+  function collectionKeysForSnapshot(data = {}) {
+    const keys = dataModel()?.snapshotCollections || [];
+    if (keys.length) return keys.filter((key) => Array.isArray(data[snapshotKey(key)]));
+    return Object.entries(data)
+      .filter(([, value]) => Array.isArray(value))
+      .map(([key]) => key);
+  }
+
   function tenantUrl(id = tenantId()) {
     const cleanId = normalizeTenantId(id);
     const basePath = window.location.pathname.replace(/\/provisionar\.html$/i, "/").replace(/\/(?:t|tenant|grupo)\/[^/]+$/i, "/");
@@ -126,6 +158,24 @@
       allowedEmails: [...new Set([...allowedEmails, currentEmail].filter(Boolean))],
       adminEmails: [...new Set([...(adminEmails.length ? adminEmails : [currentEmail]), currentEmail].filter(Boolean))],
     };
+  }
+
+  function currentAuthEmail() {
+    return normalizeEmail(auth?.currentUser?.email || user?.email || "");
+  }
+
+  function isTenantAdminUser() {
+    const email = currentAuthEmail();
+    return isSuperAdmin(auth?.currentUser || user) || (Array.isArray(tenantMeta?.adminEmails) && tenantMeta.adminEmails.includes(email));
+  }
+
+  function scopedCollectionOptions(collectionKey) {
+    if (isTenantAdminUser()) return {};
+    const email = currentAuthEmail();
+    if (!email) return {};
+    if (collectionKey === "usuarios") return { where: { email } };
+    if (["empresas", "regioes"].includes(collectionKey)) return {};
+    return { where: { consultantEmail: email } };
   }
 
   function cleanForFirestore(value) {
@@ -239,6 +289,8 @@
     const tenantRef = libs.firestoreLib.doc(ctx.firestore, ...tenantPath());
     const tenantSnap = await libs.firestoreLib.getDoc(tenantRef);
     tenantMeta = tenantSnap.exists() ? tenantSnap.data() : { tenantId: tenantId(), name: tenantId() };
+    const collectionsDb = await loadCollectionsDb(seedData);
+    if (collectionsDb) return collectionsDb;
     const ref = libs.firestoreLib.doc(ctx.firestore, ...snapshotPath());
     const snap = await libs.firestoreLib.getDoc(ref);
     if (snap.exists() && snap.data().db) return snap.data().db;
@@ -250,6 +302,205 @@
       updatedBy: user ? user.email : "bootstrap",
     });
     return seedData;
+  }
+
+  function serializableFirestoreValue(value) {
+    if (!value) return value;
+    if (value && typeof value.toDate === "function") return value.toDate().toISOString();
+    if (Array.isArray(value)) return value.map((item) => serializableFirestoreValue(item));
+    if (typeof value === "object") {
+      return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, serializableFirestoreValue(entry)]));
+    }
+    return value;
+  }
+
+  function recordFromSnapshot(collectionKey, row = {}, libs, isCreate = false, targetTenantId = tenantId()) {
+    const cleanTenantId = normalizeTenantId(targetTenantId) || tenantId();
+    const normalized = dataModel()?.normalizeSnapshotRecord?.(collectionKey, row, { tenantId: cleanTenantId }) || { ...row, tenantId: cleanTenantId };
+    const payload = cleanForFirestore(normalized);
+    delete payload.id;
+    payload.tenantId = cleanTenantId;
+    payload.updatedAt = libs.firestoreLib.serverTimestamp();
+    payload.updatedBy = auth?.currentUser?.email || auth?.currentUser?.uid || "system";
+    if (isCreate && !payload.createdAt) payload.createdAt = libs.firestoreLib.serverTimestamp();
+    if (!payload.sourceModule) payload.sourceModule = snapshotKey(collectionKey);
+    return payload;
+  }
+
+  function collectionRecordFromDoc(docSnap) {
+    return {
+      id: docSnap.id,
+      ...serializableFirestoreValue(docSnap.data() || {}),
+    };
+  }
+
+  function collectionRef(ctx, libs, collectionKey, targetTenantId = tenantId()) {
+    return libs.firestoreLib.collection(ctx.firestore, ...tenantCollectionPath(collectionKey, targetTenantId));
+  }
+
+  function recordRef(ctx, libs, collectionKey, recordId, targetTenantId = tenantId()) {
+    return libs.firestoreLib.doc(ctx.firestore, ...tenantCollectionPath(collectionKey, targetTenantId), normalizedDocId(recordId));
+  }
+
+  function queryConstraint(libs, field, value) {
+    if (Array.isArray(value) && !value.length) return null;
+    if (Array.isArray(value)) return libs.firestoreLib.where(field, "in", value.slice(0, 10));
+    return libs.firestoreLib.where(field, "==", value);
+  }
+
+  async function listRecords(collectionKey, options = {}) {
+    if (!configured) return [];
+    const ctx = await init();
+    const libs = await loadLibs();
+    const ref = collectionRef(ctx, libs, collectionKey);
+    const constraints = [];
+    Object.entries(options.where || {}).forEach(([field, value]) => {
+      if (value !== undefined && value !== "") {
+        const constraint = queryConstraint(libs, field, value);
+        if (constraint) constraints.push(constraint);
+      }
+    });
+    if (options.orderBy) constraints.push(libs.firestoreLib.orderBy(options.orderBy, options.orderDirection || "asc"));
+    if (options.limit) constraints.push(libs.firestoreLib.limit(Number(options.limit)));
+    const q = constraints.length ? libs.firestoreLib.query(ref, ...constraints) : ref;
+    const snap = await libs.firestoreLib.getDocs(q);
+    return snap.docs.map(collectionRecordFromDoc);
+  }
+
+  async function getRecord(collectionKey, recordId) {
+    if (!configured || !recordId) return null;
+    const ctx = await init();
+    const libs = await loadLibs();
+    const snap = await libs.firestoreLib.getDoc(recordRef(ctx, libs, collectionKey, recordId));
+    return snap.exists() ? collectionRecordFromDoc(snap) : null;
+  }
+
+  async function createRecord(collectionKey, data = {}) {
+    if (!configured || !auth?.currentUser) return null;
+    const ctx = await init();
+    const libs = await loadLibs();
+    const recordId = normalizedDocId(data.id);
+    const payload = recordFromSnapshot(collectionKey, data, libs, true);
+    if (recordId) {
+      await libs.firestoreLib.setDoc(recordRef(ctx, libs, collectionKey, recordId), payload, { merge: true });
+      return { id: recordId, ...data };
+    }
+    const docRef = await libs.firestoreLib.addDoc(collectionRef(ctx, libs, collectionKey), payload);
+    return { id: docRef.id, ...data };
+  }
+
+  async function updateRecord(collectionKey, recordId, data = {}) {
+    if (!configured || !auth?.currentUser || !recordId) return null;
+    const ctx = await init();
+    const libs = await loadLibs();
+    const payload = recordFromSnapshot(collectionKey, { ...data, id: recordId }, libs, false);
+    await libs.firestoreLib.setDoc(recordRef(ctx, libs, collectionKey, recordId), payload, { merge: true });
+    return { id: recordId, ...data };
+  }
+
+  async function saveRecord(collectionKey, data = {}) {
+    return data?.id ? updateRecord(collectionKey, data.id, data) : createRecord(collectionKey, data);
+  }
+
+  async function deleteRecord(collectionKey, recordId) {
+    if (!configured || !auth?.currentUser || !recordId) return false;
+    const ctx = await init();
+    const libs = await loadLibs();
+    await libs.firestoreLib.deleteDoc(recordRef(ctx, libs, collectionKey, recordId));
+    return true;
+  }
+
+  async function commitBatchIfNeeded(batch, state, force = false) {
+    if (!batch || (!force && state.count < 440) || state.count === 0) return batch;
+    await batch.commit();
+    state.count = 0;
+    return null;
+  }
+
+  async function replaceCollectionFromSnapshot(collectionKey, rows = [], options = {}) {
+    if (!configured || !auth?.currentUser) return { collectionKey, written: 0, deleted: 0 };
+    const ctx = await init();
+    const libs = await loadLibs();
+    const targetTenantId = normalizeTenantId(options.tenantId) || tenantId();
+    const existing = await libs.firestoreLib.getDocs(collectionRef(ctx, libs, collectionKey, targetTenantId));
+    const currentIds = new Set();
+    let written = 0;
+    let deleted = 0;
+    let batch = libs.firestoreLib.writeBatch(ctx.firestore);
+    const state = { count: 0 };
+    for (const row of rows || []) {
+      const recordId = normalizedDocId(row.id) || normalizedDocId(crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`);
+      currentIds.add(recordId);
+      batch.set(recordRef(ctx, libs, collectionKey, recordId, targetTenantId), recordFromSnapshot(collectionKey, { ...row, id: recordId }, libs, !row.createdAt, targetTenantId), { merge: true });
+      state.count += 1;
+      written += 1;
+      batch = await commitBatchIfNeeded(batch, state) || libs.firestoreLib.writeBatch(ctx.firestore);
+    }
+    for (const docSnap of existing.docs) {
+      if (currentIds.has(docSnap.id)) continue;
+      batch.delete(docSnap.ref);
+      state.count += 1;
+      deleted += 1;
+      batch = await commitBatchIfNeeded(batch, state) || libs.firestoreLib.writeBatch(ctx.firestore);
+    }
+    await commitBatchIfNeeded(batch, state, true);
+    return { collectionKey, written, deleted };
+  }
+
+  async function syncSnapshotCollections(data = {}, options = {}) {
+    if (!configured || !auth?.currentUser) return { records: 0, collections: 0, results: [] };
+    const keys = options.collectionKeys || collectionKeysForSnapshot(data);
+    const targetTenantId = normalizeTenantId(options.tenantId) || tenantId();
+    const results = [];
+    for (const key of keys) {
+      const rows = Array.isArray(data[snapshotKey(key)]) ? data[snapshotKey(key)] : [];
+      results.push(await replaceCollectionFromSnapshot(key, rows, { tenantId: targetTenantId }));
+    }
+    const records = results.reduce((total, item) => total + item.written, 0);
+    if (options.activateCollections) {
+      const ctx = await init();
+      const libs = await loadLibs();
+      await libs.firestoreLib.setDoc(
+        libs.firestoreLib.doc(ctx.firestore, "tenants", targetTenantId),
+        {
+          dataMode: "collections",
+          dataModelVersion: dataModel()?.version || "collections-v1",
+          collectionsActivatedAt: libs.firestoreLib.serverTimestamp(),
+          updatedAt: libs.firestoreLib.serverTimestamp(),
+          updatedBy: auth.currentUser.email || auth.currentUser.uid,
+        },
+        { merge: true }
+      );
+      if (targetTenantId === tenantId()) {
+        tenantMeta = { ...tenantMeta, dataMode: "collections", dataModelVersion: dataModel()?.version || "collections-v1" };
+      }
+    }
+    return { records, collections: results.length, results };
+  }
+
+  async function loadCollectionsDb(seedData = {}) {
+    const mode = settings.dataMode || tenantMeta?.dataMode || "";
+    if (!dataModel() || !["collections", "hybrid"].includes(mode)) return null;
+    const keys = collectionKeysForSnapshot(seedData);
+    if (!keys.length) return null;
+    const nextDb = { ...seedData };
+    let loaded = 0;
+    let attempted = 0;
+    for (const key of keys) {
+      try {
+        const rows = await listRecords(key, scopedCollectionOptions(key));
+        nextDb[snapshotKey(key)] = rows;
+        loaded += rows.length;
+        attempted += 1;
+      } catch (error) {
+        console.warn(`Falha ao carregar colecao ${key}`, error);
+      }
+    }
+    return attempted || loaded ? nextDb : null;
+  }
+
+  async function migrateSnapshotToCollections(data = {}, options = {}) {
+    return syncSnapshotCollections(data, { ...options, activateCollections: options.activateCollections === true });
   }
 
   async function saveDb(data) {
@@ -302,7 +553,7 @@
       to: message.to,
       cc: message.cc ? [message.cc] : [],
       message: {
-        subject: message.subject || "VendeGov CRM",
+        subject: message.subject || "GestãoGOV!",
         text: message.body || "",
       },
       status: "pending",
@@ -374,6 +625,8 @@
       plan,
       branding,
       loginCustomization,
+      dataMode: "collections",
+      dataModelVersion: dataModel()?.version || "collections-v1",
       version: "v1",
       allowedEmails,
       adminEmails,
@@ -412,10 +665,31 @@
       updatedAt: libs.firestoreLib.serverTimestamp(),
       updatedBy: ownerEmail || ctx.auth.currentUser.uid,
     });
+    await syncSnapshotCollections(options.seedDb || {}, {
+      tenantId: cleanTenantId,
+      collectionKeys: collectionKeysForSnapshot(options.seedDb || {}),
+    });
     await libs.firestoreLib.setDoc(libs.firestoreLib.doc(ctx.firestore, ...publicTenantPath(cleanTenantId)), {
       ...publicConfig,
       updatedAt: libs.firestoreLib.serverTimestamp(),
     });
+    await libs.firestoreLib.setDoc(libs.firestoreLib.doc(ctx.firestore, "platform", "tenants", "index", cleanTenantId), {
+      tenantId: cleanTenantId,
+      name: meta.name,
+      status: meta.status,
+      planId: plan.id,
+      planName: plan.name,
+      adminEmail,
+      url: tenantUrl(cleanTenantId),
+      createdAt: libs.firestoreLib.serverTimestamp(),
+      updatedAt: libs.firestoreLib.serverTimestamp(),
+    });
+    if (plan.id) {
+      await libs.firestoreLib.setDoc(libs.firestoreLib.doc(ctx.firestore, "platform", "plans", "items", plan.id), {
+        ...plan,
+        updatedAt: libs.firestoreLib.serverTimestamp(),
+      }, { merge: true });
+    }
     return { tenantId: cleanTenantId, name: meta.name, planId: plan.id, plan, url: tenantUrl(cleanTenantId) };
   }
 
@@ -477,7 +751,10 @@
   }
 
   function aiModelName() {
-    return aiSettings().model || "gemini-3.6-flash";
+    const provider = aiProvider();
+    const model = aiSettings().model || "";
+    if (provider === "mistral") return normalizeMistralChatModel(model);
+    return model || "gemini-3.6-flash";
   }
 
   function aiEndpoint() {
@@ -492,7 +769,7 @@
   }
 
   function supportsDirectAi() {
-    return aiConnectionMode() === "direct-api-key" && aiProvider() === "google-gemini" && Boolean(aiApiKey());
+    return aiConnectionMode() === "direct-api-key" && ["google-gemini", "mistral"].includes(aiProvider()) && Boolean(aiApiKey());
   }
 
   async function getAiModel() {
@@ -597,6 +874,109 @@
     return answer;
   }
 
+  function normalizeMistralChatModel(model = "") {
+    const clean = String(model || "").trim();
+    if (!clean || clean === "mistral-tiny") return "mistral-small-latest";
+    return clean;
+  }
+
+  function mistralChatEndpoint() {
+    const endpoint = aiEndpoint();
+    if (endpoint) return endpoint;
+    return "https://api.mistral.ai/v1/chat/completions";
+  }
+
+  function mistralOcrEndpoint() {
+    return "https://api.mistral.ai/v1/ocr";
+  }
+
+  function mistralMessageText(content) {
+    if (Array.isArray(content)) {
+      return content.map((part) => part.text || part.content || "").filter(Boolean).join("\n").trim();
+    }
+    return String(content || "").trim();
+  }
+
+  function mistralErrorMessage(text, fallback) {
+    try {
+      const parsed = JSON.parse(text);
+      return parsed.message || parsed.error?.message || parsed.detail || fallback;
+    } catch {
+      return text || fallback;
+    }
+  }
+
+  async function directMistralChatRequest(prompt) {
+    const key = aiApiKey();
+    if (!key) throw new Error("Chave da API Mistral nao configurada.");
+    const response = await fetch(mistralChatEndpoint(), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${key}`,
+      },
+      body: JSON.stringify({
+        model: normalizeMistralChatModel(aiModelName()),
+        messages: [{ role: "user", content: prompt }],
+        temperature: 0.2,
+      }),
+    });
+    const text = await response.text();
+    if (!response.ok) throw new Error(mistralErrorMessage(text, "A API Mistral retornou erro."));
+    const json = JSON.parse(text);
+    const answer = mistralMessageText(json.choices?.[0]?.message?.content);
+    if (!answer) throw new Error("A API Mistral nao retornou texto.");
+    return answer;
+  }
+
+  function decodeBase64Text(data) {
+    const raw = atob(String(data || ""));
+    const bytes = Uint8Array.from(raw, (char) => char.charCodeAt(0));
+    try {
+      return new TextDecoder("utf-8").decode(bytes);
+    } catch {
+      return raw;
+    }
+  }
+
+  async function directMistralOcr(filePayload) {
+    const key = aiApiKey();
+    if (!key) throw new Error("Chave da API Mistral nao configurada.");
+    if (!filePayload?.data) throw new Error("Arquivo sem conteudo para OCR.");
+    if (String(filePayload.mimeType || "").startsWith("text/")) return decodeBase64Text(filePayload.data);
+    const response = await fetch(mistralOcrEndpoint(), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${key}`,
+      },
+      body: JSON.stringify({
+        model: "mistral-ocr-latest",
+        document: {
+          type: "document_url",
+          document_url: `data:${filePayload.mimeType || "application/pdf"};base64,${filePayload.data}`,
+        },
+        include_image_base64: false,
+        table_format: "markdown",
+      }),
+    });
+    const text = await response.text();
+    if (!response.ok) throw new Error(mistralErrorMessage(text, "A API OCR da Mistral retornou erro."));
+    const json = JSON.parse(text);
+    const markdown = (json.pages || []).map((page) => page.markdown || "").filter(Boolean).join("\n\n").trim();
+    if (!markdown) throw new Error("A Mistral OCR nao retornou texto para o documento.");
+    return markdown;
+  }
+
+  async function directMistralContractAnalysis(prompt, filePayload) {
+    const extractedText = await directMistralOcr(filePayload);
+    const limitedText = extractedText.length > 60000 ? `${extractedText.slice(0, 60000)}\n\n[Texto truncado para analise]` : extractedText;
+    return directMistralChatRequest(`${prompt}
+
+Texto extraido do documento por OCR:
+${limitedText}`);
+  }
+
   function parseJsonResponse(text) {
     const clean = String(text || "").trim().replace(/^```(?:json)?/i, "").replace(/```$/i, "").trim();
     try {
@@ -612,7 +992,7 @@
     if (!file) throw new Error("Selecione um PDF de contrato.");
     if (file.size > 18 * 1024 * 1024) throw new Error("O PDF precisa ter ate 18 MB para analise direta.");
     const prompt = `
-Voce e um assistente juridico-operacional do VendeGov CRM para empresas que vendem ao governo.
+Voce e um assistente juridico-operacional da plataforma GestãoGOV! para empresas que vendem ao governo.
 Leia o documento enviado e extraia os dados do contrato publico.
 Responda somente JSON valido, sem markdown, neste formato:
 {
@@ -642,11 +1022,14 @@ Responda somente JSON valido, sem markdown, neste formato:
 Use strings vazias quando uma informacao nao estiver no documento. Valores devem ser numero em reais, sem separador de milhar.`;
     if (aiProvider() !== "firebase-ai-logic") {
       if (supportsDirectAi()) {
-        const text = await directGeminiRequest(prompt, await fileToBase64Payload(file));
+        const payload = await fileToBase64Payload(file);
+        const text = aiProvider() === "mistral"
+          ? await directMistralContractAnalysis(prompt, payload)
+          : await directGeminiRequest(prompt, payload);
         return parseJsonResponse(text);
       }
       if (aiConnectionMode() === "direct-api-key") {
-        throw new Error("Chamada direta com chave API esta disponivel para Google Gemini. Selecione Google Gemini API ou use endpoint seguro.");
+        throw new Error("Chamada direta com chave API esta disponivel para Google Gemini e Mistral. Confira o provedor, a chave e o modelo.");
       }
       const custom = await customAiRequest("analyzeContractFile", {
         prompt,
@@ -665,9 +1048,9 @@ Use strings vazias quando uma informacao nao estiver no documento. Valores devem
   async function generateRenewalLetter(contract, renewal = {}) {
     if (!contract) throw new Error("Selecione um contrato.");
     const prompt = `
-Voce e o assistente de renovacoes do VendeGov CRM.
+Voce e o assistente de renovacoes da plataforma GestãoGOV!
 Gere uma carta profissional de renovacao contratual em portugues do Brasil, pronta para envio a uma empresa cliente.
-Use tom executivo, claro e comercial, com assunto, saudacao, corpo, proximos passos e assinatura "Equipe VendeGov".
+Use tom executivo, claro e comercial, com assunto, saudacao, corpo, proximos passos e assinatura "Equipe GestãoGOV!".
 Nao invente dados ausentes; quando faltar algo, escreva de forma neutra.
 
 Dados do contrato:
@@ -678,10 +1061,10 @@ ${JSON.stringify(renewal || {}, null, 2)}
 `;
     if (aiProvider() !== "firebase-ai-logic") {
       if (supportsDirectAi()) {
-        return directGeminiRequest(prompt);
+        return aiProvider() === "mistral" ? directMistralChatRequest(prompt) : directGeminiRequest(prompt);
       }
       if (aiConnectionMode() === "direct-api-key") {
-        throw new Error("Chamada direta com chave API esta disponivel para Google Gemini. Selecione Google Gemini API ou use endpoint seguro.");
+        throw new Error("Chamada direta com chave API esta disponivel para Google Gemini e Mistral. Confira o provedor, a chave e o modelo.");
       }
       const custom = await customAiRequest("generateRenewalLetter", {
         prompt,
@@ -713,6 +1096,15 @@ ${JSON.stringify(renewal || {}, null, 2)}
     loadPublicTenantConfig,
     loadDb,
     saveDb,
+    listRecords,
+    getRecord,
+    createRecord,
+    updateRecord,
+    saveRecord,
+    deleteRecord,
+    replaceCollectionFromSnapshot,
+    syncSnapshotCollections,
+    migrateSnapshotToCollections,
     syncTenantAccess,
     provisionTenant,
     createAuthUser,

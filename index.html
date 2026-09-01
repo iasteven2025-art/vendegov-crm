@@ -3,15 +3,15 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>VendeGov CRM - Sistema</title>
-    <meta name="description" content="Sistema VendeGov CRM para empresas que vendem ao governo." />
-    <link rel="icon" href="./assets/vendegov-crm-simbolo.svg" />
-    <link rel="stylesheet" href="./styles.css?v=20260826-novo-contrato-page" />
+    <title>GestãoGOV! - Sistema</title>
+    <meta name="description" content="Sistema GestãoGOV! para empresas que vendem ao governo." />
+    <link rel="icon" href="./assets/vendegov-crm-simbolo.svg?v=20260830-gestaogov-brand" />
+    <link rel="stylesheet" href="./styles.css?v=20260830-gestaogov-brand" />
   </head>
   <body>
     <section class="login-screen" id="loginScreen">
       <div class="login-panel">
-        <img class="login-logo" id="loginLogo" src="./assets/vendegov-crm-logo-horizontal.svg" alt="VendeGov CRM" />
+        <img class="login-logo" id="loginLogo" src="./assets/vendegov-crm-logo-horizontal.svg?v=20260830-gestaogov-brand" alt="GestãoGOV!" />
         <h1 id="loginTitle">Operacao comercial B2G em um unico lugar</h1>
         <p id="loginSubtitle">
           Controle agenda, clientes, licitacoes, propostas, marketing, contratos, documentos,
@@ -48,10 +48,10 @@
     <div class="app-shell hidden" id="appShell">
       <aside class="sidebar">
         <div class="brand">
-          <img id="sidebarLogo" src="./assets/vendegov-crm-simbolo.svg" alt="" />
+          <img id="sidebarLogo" src="./assets/vendegov-crm-simbolo.svg?v=20260830-gestaogov-brand" alt="" />
           <div>
-            <strong id="sidebarBrandName">VendeGov</strong>
-            <span id="sidebarBrandTagline">CRM B2G</span>
+            <strong id="sidebarBrandName">GestãoGOV!</strong>
+            <span id="sidebarBrandTagline">Gestão Pública</span>
           </div>
         </div>
         <nav class="nav-list" id="mainNav" aria-label="Menu principal"></nav>
@@ -65,7 +65,7 @@
       <main class="main">
         <header class="topbar">
           <div>
-            <p class="eyebrow" id="pageKicker">VendeGov CRM</p>
+            <p class="eyebrow" id="pageKicker">GestãoGOV!</p>
             <h1 id="pageTitle">Painel</h1>
           </div>
           <div class="top-actions">
@@ -145,8 +145,9 @@
 
     <input id="importFile" type="file" accept=".json,.csv,application/json,text/csv" hidden />
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script src="./data-model.js?v=20260830-saas-model"></script>
     <script src="./firebase-config.js?v=20260824-firestore-safe-login"></script>
-    <script src="./firebase-adapter.js?v=20260826-superadmin-provisioning"></script>
-    <script src="./app.js?v=20260826-novo-contrato-page"></script>
+    <script src="./firebase-adapter.js?v=20260831-saas-multitenant"></script>
+    <script src="./app.js?v=20260830-gestaogov-brand"></script>
   </body>
 </html>

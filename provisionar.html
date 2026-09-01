@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Provisionar VendeGov CRM</title>
+    <title>Provisionar GestãoGOV!</title>
     <link rel="icon" href="./assets/vendegov-crm-simbolo.svg" />
     <style>
       :root {
@@ -251,7 +251,7 @@
     <main>
       <section class="hero">
         <div class="hero-brand">
-          <img src="./assets/vendegov-crm-logo-horizontal.svg" alt="VendeGov CRM" />
+          <img src="./assets/vendegov-crm-logo-horizontal.svg?v=20260830-gestaogov-brand" alt="GestãoGOV!" />
           <h1>Provisionamento multitenant</h1>
           <p>
             Crie um ambiente isolado para cada grupo de empresas, com plano contratado,
@@ -327,8 +327,8 @@
             <div class="plan-hint" id="planHint"></div>
 
             <div class="section-title"><span>Identidade visual</span><h3>Marca, cores e tela de login</h3></div>
-            <label>Nome exibido no produto<input name="productName" value="VendeGov" /></label>
-            <label>Tagline do menu<input name="tagline" value="CRM B2G" /></label>
+            <label>Nome exibido no produto<input name="productName" value="GestãoGOV!" /></label>
+            <label>Tagline do menu<input name="tagline" value="Gestão Pública" /></label>
             <label>Cor principal do ambiente<input name="primaryColor" type="color" value="#20b978" /></label>
             <label>Cor de apoio<input name="accentColor" type="color" value="#0f8a58" /></label>
             <label>Cor escura<input name="navyColor" type="color" value="#071b2d" /></label>
@@ -338,9 +338,9 @@
             <label class="wide">Texto da tela de login<textarea name="loginSubtitle">Controle agenda, clientes, licitacoes, propostas, marketing, contratos, documentos, renovacoes, comissoes, relatorios e parametrizacao.</textarea></label>
             <label class="wide">Observacao do login<input name="loginNote" value="Ambiente conectado ao Firebase para uso real da equipe." /></label>
             <div class="preview-card">
-              <img id="brandPreviewLogo" src="./assets/vendegov-crm-logo-horizontal.svg" alt="Previa da logo" />
+              <img id="brandPreviewLogo" src="./assets/vendegov-crm-logo-horizontal.svg?v=20260830-gestaogov-brand" alt="Previa da logo" />
               <div>
-                <strong id="brandPreviewName">VendeGov</strong>
+                <strong id="brandPreviewName">GestãoGOV!</strong>
                 <span id="brandPreviewText">A identidade visual sera aplicada ao login e ao ambiente do tenant.</span>
               </div>
             </div>
@@ -368,8 +368,9 @@
       </section>
     </main>
 
+    <script src="./data-model.js?v=20260830-saas-model"></script>
     <script src="./firebase-config.js?v=20260824-firestore-safe-login"></script>
-    <script src="./firebase-adapter.js?v=20260826-superadmin-provisioning"></script>
+    <script src="./firebase-adapter.js?v=20260831-saas-multitenant"></script>
     <script>
       const authShell = document.querySelector("#authShell");
       const provisioningShell = document.querySelector("#provisioningShell");
@@ -431,7 +432,7 @@
         };
       }
 
-      function currentLogoUrl(data) { return logoDataUrl || data.logoUrl || "./assets/vendegov-crm-logo-horizontal.svg"; }
+      function currentLogoUrl(data) { return logoDataUrl || data.logoUrl || "./assets/vendegov-crm-logo-horizontal.svg?v=20260830-gestaogov-brand"; }
 
       function buildPlan(data) {
         const maxUsers = Math.max(1, Number(data.maxUsers || 1));
@@ -459,8 +460,8 @@
 
       function buildLoginCustomization(data) {
         return {
-          productName: data.productName || "VendeGov",
-          tagline: data.tagline || "CRM B2G",
+          productName: data.productName || "GestãoGOV!",
+          tagline: data.tagline || "Gestão Pública",
           title: data.loginTitle || "Operacao comercial B2G em um unico lugar",
           subtitle: data.loginSubtitle || "",
           note: data.loginNote || "",
@@ -523,7 +524,7 @@
       function refreshBrandPreview() {
         const data = Object.fromEntries(new FormData(tenantForm).entries());
         brandPreviewLogo.src = currentLogoUrl(data);
-        brandPreviewName.textContent = data.productName || "VendeGov";
+        brandPreviewName.textContent = data.productName || "GestãoGOV!";
         document.documentElement.style.setProperty("--green", data.primaryColor || "#20b978");
         document.documentElement.style.setProperty("--accent", data.accentColor || "#2d7ff9");
         document.documentElement.style.setProperty("--navy", data.navyColor || "#071b2d");

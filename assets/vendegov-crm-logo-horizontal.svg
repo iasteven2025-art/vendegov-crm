@@ -1,15 +1,30 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="760" height="172" viewBox="0 0 760 172" role="img" aria-label="VendeGov CRM logo">
-  
-  <g transform="translate(42 28)">
-    <rect x="0" y="0" width="116" height="116" rx="26" fill="#0B1F33"/>
-    <path d="M28 72 C28 39 53 19 83 23 C101 25 112 38 114 55" fill="none" stroke="#19A7A8" stroke-opacity="0.56" stroke-width="7" stroke-linecap="round"/>
-    <path d="M26 73 L51 98 L106 29" fill="none" stroke="#1FAF72" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
-    <circle cx="106" cy="29" r="7" fill="#19A7A8" stroke="#0B1F33" stroke-width="4"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="190" viewBox="0 0 900 190" role="img" aria-label="GestãoGOV! logo">
+  <defs>
+    <linearGradient id="gestaogov-logo-bg" x1="38" y1="22" x2="158" y2="168" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#305FB0"/>
+      <stop offset="0.58" stop-color="#7058B5"/>
+      <stop offset="1" stop-color="#A04FBF"/>
+    </linearGradient>
+    <linearGradient id="gestaogov-word" x1="210" y1="52" x2="542" y2="130" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#305FB0"/>
+      <stop offset="0.5" stop-color="#4B3B98"/>
+      <stop offset="1" stop-color="#A04FBF"/>
+    </linearGradient>
+    <filter id="gestaogov-logo-shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="12" stdDeviation="10" flood-color="#305FB0" flood-opacity="0.18"/>
+    </filter>
+  </defs>
+  <g transform="translate(38 28)">
+    <rect x="0" y="0" width="134" height="134" rx="32" fill="url(#gestaogov-logo-bg)" filter="url(#gestaogov-logo-shadow)"/>
+    <path d="M42 82h52M49 82v17M67 82v17M85 82v17M37 100h23M61 100h23M85 100h23" fill="none" stroke="#FFFFFF" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M39 65h12v17H39zM58 51h12v31H58zM77 38h12v44H77z" fill="none" stroke="#FFFFFF" stroke-width="5" stroke-linejoin="round"/>
+    <path d="M39 56c14-3 25-11 32-25" fill="none" stroke="#FFFFFF" stroke-width="5" stroke-linecap="round"/>
+    <path d="M68 32h10V22" fill="none" stroke="#FFFFFF" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M95 28H81v23h23V38z" fill="none" stroke="#FFFFFF" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M88 62h17M88 72h17" fill="none" stroke="#FFFFFF" stroke-width="4.5" stroke-linecap="round"/>
   </g>
-  <text x="198" y="90" font-family="Segoe UI, Inter, Arial, sans-serif" font-size="58" font-weight="700" letter-spacing="0">
-    <tspan fill="#0B1F33">Vende</tspan><tspan fill="#1FAF72">Gov</tspan>
-  </text>
-  <rect x="522" y="57" width="84" height="32" rx="16" fill="#EAF7F2" fill-opacity="1" stroke="#1FAF72" stroke-width="2"/>
-  <text x="544" y="79" font-family="Segoe UI, Inter, Arial, sans-serif" font-size="18" font-weight="700" fill="#0B1F33">CRM</text>
-  
+  <text x="202" y="91" font-family="Segoe UI, Inter, Arial, sans-serif" font-size="58" font-weight="800" letter-spacing="0" fill="url(#gestaogov-word)">GestãoGOV!</text>
+  <text x="205" y="126" font-family="Segoe UI, Inter, Arial, sans-serif" font-size="19" font-weight="600" letter-spacing="0" fill="#1F2B37">Plataforma de Relacionamento e Gestão Pública</text>
+  <rect x="600" y="55" width="74" height="30" rx="15" fill="#F0F7FF" stroke="#305FB0" stroke-width="2"/>
+  <text x="620" y="76" font-family="Segoe UI, Inter, Arial, sans-serif" font-size="16" font-weight="800" fill="#305FB0">B2G</text>
 </svg>

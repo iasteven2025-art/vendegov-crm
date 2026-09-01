@@ -1,6 +1,19 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-label="VendeGov CRM simbolo">
-  <rect x="16" y="16" width="224" height="224" rx="54" fill="#0B1F33"/>
-  <path d="M69 154 C68 91 115 52 172 59 C205 63 225 88 229 121" fill="none" stroke="#19A7A8" stroke-opacity="0.56" stroke-width="16" stroke-linecap="round"/>
-  <path d="M67 156 L116 205 L222 72" fill="none" stroke="#1FAF72" stroke-width="29" stroke-linecap="round" stroke-linejoin="round"/>
-  <circle cx="222" cy="72" r="15" fill="#19A7A8" stroke="#0B1F33" stroke-width="8"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-label="GestãoGOV! símbolo">
+  <defs>
+    <linearGradient id="gestaogov-icon-bg" x1="42" y1="30" x2="214" y2="226" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#305FB0"/>
+      <stop offset="0.58" stop-color="#7058B5"/>
+      <stop offset="1" stop-color="#A04FBF"/>
+    </linearGradient>
+    <filter id="gestaogov-shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="14" stdDeviation="12" flood-color="#305FB0" flood-opacity="0.22"/>
+    </filter>
+  </defs>
+  <rect x="18" y="18" width="220" height="220" rx="52" fill="url(#gestaogov-icon-bg)" filter="url(#gestaogov-shadow)"/>
+  <path d="M78 157h100M92 157v30M128 157v30M164 157v30M72 187h40M108 187h40M144 187h40" fill="none" stroke="#FFFFFF" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M69 122h22v35H69zM105 96h22v61h-22zM141 73h22v84h-22z" fill="none" stroke="#FFFFFF" stroke-width="9" stroke-linejoin="round"/>
+  <path d="M69 103c25-6 45-20 59-45" fill="none" stroke="#FFFFFF" stroke-width="9" stroke-linecap="round"/>
+  <path d="M121 59h18V41" fill="none" stroke="#FFFFFF" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M172 54h-26v44h44V72z" fill="none" stroke="#FFFFFF" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M159 116h31M159 135h31" fill="none" stroke="#FFFFFF" stroke-width="8" stroke-linecap="round"/>
 </svg>

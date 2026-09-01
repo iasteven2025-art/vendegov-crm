@@ -46,6 +46,55 @@ service cloud.firestore {
       );
     }
 
+    function tenantCollectionProtected(collectionId) {
+      return collectionId in ["members", "public", "snapshots", "outbox"];
+    }
+
+    function sharedTenantCollection(collectionId) {
+      return collectionId in ["empresas", "regioes"];
+    }
+
+    function tenantUsesCollections(tenantId) {
+      return tenantExists(tenantId) &&
+        get(tenantPath(tenantId)).data.get("dataMode", "") == "collections";
+    }
+
+    function resourceBelongsToTenant(tenantId) {
+      return !("tenantId" in request.resource.data) || request.resource.data.tenantId == tenantId;
+    }
+
+    function recordMatchesUser(data) {
+      return signedIn() && (
+        data.get("consultantEmail", "") == request.auth.token.email ||
+        data.get("consultor_responsavel", "") == request.auth.token.email ||
+        data.get("ownerEmail", "") == request.auth.token.email ||
+        data.get("responsibleEmail", "") == request.auth.token.email ||
+        data.get("userEmail", "") == request.auth.token.email ||
+        data.get("email", "") == request.auth.token.email ||
+        data.get("createdByUid", "") == request.auth.uid
+      );
+    }
+
+    function canReadTenantRecord(tenantId, collectionId) {
+      return isAdmin(tenantId) ||
+        sharedTenantCollection(collectionId) ||
+        recordMatchesUser(resource.data);
+    }
+
+    function canWriteTenantRecord(tenantId, collectionId) {
+      return isAdmin(tenantId) ||
+        (
+          isMember(tenantId) &&
+          !sharedTenantCollection(collectionId) &&
+          resourceBelongsToTenant(tenantId) &&
+          recordMatchesUser(request.resource.data)
+        );
+    }
+
+    match /platform/{document=**} {
+      allow read, write: if isSuperAdmin();
+    }
+
     match /tenants/{tenantId} {
       allow read: if isMember(tenantId);
       allow create: if isSuperAdmin() &&
@@ -72,11 +121,55 @@ service cloud.firestore {
       }
 
       match /snapshots/{snapshotId} {
-        allow read, write: if isMember(tenantId);
+        allow read, write: if isAdmin(tenantId) || (
+          isMember(tenantId) &&
+          !tenantUsesCollections(tenantId)
+        );
       }
 
       match /outbox/{messageId} {
         allow read, write: if isMember(tenantId);
+      }
+
+      match /{collectionId}/{recordId} {
+        allow read: if isMember(tenantId) &&
+          !tenantCollectionProtected(collectionId) &&
+          canReadTenantRecord(tenantId, collectionId);
+        allow create: if isMember(tenantId) &&
+          !tenantCollectionProtected(collectionId) &&
+          canWriteTenantRecord(tenantId, collectionId);
+        allow update: if isMember(tenantId) &&
+          !tenantCollectionProtected(collectionId) &&
+          canReadTenantRecord(tenantId, collectionId) &&
+          canWriteTenantRecord(tenantId, collectionId);
+        allow delete: if !tenantCollectionProtected(collectionId) && (
+          isAdmin(tenantId) ||
+          (
+            isMember(tenantId) &&
+            !sharedTenantCollection(collectionId) &&
+            collectionId != "usuarios" &&
+            canReadTenantRecord(tenantId, collectionId)
+          )
+        );
+      }
+
+      match /{collectionId}/{recordId}/{subCollectionId}/{subRecordId} {
+        allow read: if isMember(tenantId) &&
+          !tenantCollectionProtected(collectionId) &&
+          canReadTenantRecord(tenantId, collectionId);
+        allow create, update: if isMember(tenantId) &&
+          !tenantCollectionProtected(collectionId) &&
+          resourceBelongsToTenant(tenantId) &&
+          canWriteTenantRecord(tenantId, collectionId);
+        allow delete: if !tenantCollectionProtected(collectionId) && (
+          isAdmin(tenantId) ||
+          (
+            isMember(tenantId) &&
+            !sharedTenantCollection(collectionId) &&
+            collectionId != "usuarios" &&
+            canReadTenantRecord(tenantId, collectionId)
+          )
+        );
       }
     }
   }

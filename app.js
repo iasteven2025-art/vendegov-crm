@@ -114,7 +114,7 @@ const schemas = {
       field("adjustment", "Indice/reajuste", "text"),
       field("attachment", "Enviar PDF para o Firebase", "file"),
       field("fileRef", "Nome do PDF na plataforma", "text"),
-      field("fileUrl", "PDF salvo no VendeGov", "url"),
+      field("fileUrl", "PDF salvo no GestãoGOV!", "url"),
       field("documentUrl", "PDF origem (importado)", "url"),
       field("sourceId", "ID origem", "text"),
       field("owner", "Responsavel", "select", true, ["Steven Passos", "Diego Pereira", "Digital Compasso", "Mariana Costa", "Rafael Lima", "Financeiro", "Equipe comercial"]),
@@ -526,9 +526,9 @@ function seedDb() {
     ],
     usuarios: [
       record({ name: "Steven Passos", email: "steven.passos@computeck.com.br", role: "Administrador", status: "green", lastAccess: today() }),
-      record({ name: "Mariana Costa", email: "mariana@vendegov.com.br", role: "Gestor", status: "green", lastAccess: "2026-08-21" }),
-      record({ name: "Rafael Lima", email: "rafael@vendegov.com.br", role: "Comercial", status: "green", lastAccess: "2026-08-20" }),
-      record({ name: "Equipe documentos", email: "docs@vendegov.com.br", role: "Documentos", status: "yellow", lastAccess: "2026-08-18" }),
+      record({ name: "Mariana Costa", email: "mariana@gestaogov.com.br", role: "Gestor", status: "green", lastAccess: "2026-08-21" }),
+      record({ name: "Rafael Lima", email: "rafael@gestaogov.com.br", role: "Comercial", status: "green", lastAccess: "2026-08-20" }),
+      record({ name: "Equipe documentos", email: "docs@gestaogov.com.br", role: "Documentos", status: "yellow", lastAccess: "2026-08-18" }),
     ],
     templates: [
       record({ name: "Envio de proposta", type: "Proposta", subject: "Proposta comercial - {{cliente}}", status: "green", updatedAt: "2026-08-12", body: "Segue proposta comercial para analise." }),
@@ -536,8 +536,8 @@ function seedDb() {
       record({ name: "Renovacao de contrato", type: "Renovacao", subject: "Renovacao contratual - {{contrato}}", status: "yellow", updatedAt: "2026-08-08", body: "Vamos iniciar a tratativa de renovacao." }),
     ],
     empresas: [
-      record({ name: "Computeck Solucoes Inteligentes", region: "Nacional", cnpj: "00.000.000/0001-00", email: "steven.passos@computeck.com.br", phone: "", address: "", city: "Governador Valadares/MG", logoUrl: "./assets/vendegov-crm-logo-horizontal.svg", portfolio: "Gestao B2G", manager: "Steven Passos", status: "green", notes: "Empresa proprietaria do produto." }),
-      record({ name: "Grupo Actcon", region: "Sudeste", cnpj: "", email: "steven.passos@computeck.com.br", phone: "", address: "", city: "Minas Gerais", logoUrl: "./assets/vendegov-crm-logo-horizontal.svg", portfolio: "Consultoria publica", manager: "Mariana Costa", status: "green", notes: "Carteira demonstrativa." }),
+      record({ name: "Computeck Solucoes Inteligentes", region: "Nacional", cnpj: "00.000.000/0001-00", email: "steven.passos@computeck.com.br", phone: "", address: "", city: "Governador Valadares/MG", logoUrl: "./assets/vendegov-crm-logo-horizontal.svg?v=20260830-gestaogov-brand", portfolio: "Gestao B2G", manager: "Steven Passos", status: "green", notes: "Empresa proprietaria do produto." }),
+      record({ name: "Grupo Actcon", region: "Sudeste", cnpj: "", email: "steven.passos@computeck.com.br", phone: "", address: "", city: "Minas Gerais", logoUrl: "./assets/vendegov-crm-logo-horizontal.svg?v=20260830-gestaogov-brand", portfolio: "Consultoria publica", manager: "Mariana Costa", status: "green", notes: "Carteira demonstrativa." }),
     ],
     regioes: [
       record({ name: "Sudeste", owner: "Mariana Costa", states: "SP, RJ, MG, ES", goal: 420000, status: "green", notes: "Maior carteira em receita recorrente." }),
@@ -656,8 +656,12 @@ function currentUserLabel() {
   return user?.email || "Usuario Firebase";
 }
 
+function currentUserEmail() {
+  return String(cloud()?.currentUser?.()?.email || "").trim().toLowerCase();
+}
+
 function currentUserRecord() {
-  const email = String(cloud()?.currentUser?.()?.email || "").toLowerCase();
+  const email = currentUserEmail();
   if (!email) return null;
   return (db.usuarios || []).find((item) => String(item.email || item.contactEmail || "").toLowerCase() === email) || null;
 }
@@ -679,7 +683,7 @@ function firstName(name) {
 
 function initials(name) {
   const parts = cleanImport(name).split(/\s+/).filter(Boolean);
-  const letters = parts.length > 1 ? [parts[0], parts[parts.length - 1]] : [parts[0] || "VG"];
+  const letters = parts.length > 1 ? [parts[0], parts[parts.length - 1]] : [parts[0] || "GG"];
   return letters.map((part) => part[0] || "").join("").slice(0, 2).toUpperCase();
 }
 
@@ -703,10 +707,26 @@ function syncCloudAiConfig() {
   if (cloud()?.setAiConfig) cloud().setAiConfig(getAiConfig());
 }
 
+function currentUserIsTenantAdmin() {
+  const email = currentUserEmail();
+  if (!email) return false;
+  const profile = currentUserRecord() || {};
+  const role = normalizeText(profile.role || "");
+  const tenantInfo = cloud()?.tenantInfo?.() || {};
+  const adminEmails = (tenantInfo.adminEmails || []).map((item) => String(item || "").toLowerCase());
+  return email === cloud()?.superAdminEmail?.() ||
+    adminEmails.includes(email) ||
+    role.includes("administrador") ||
+    role.includes("admin") ||
+    role === "gestor";
+}
+
 function consultantScopeActive() {
+  if (!currentUserEmail()) return false;
+  if (currentUserIsTenantAdmin()) return false;
   const profile = currentUserRecord();
   const role = normalizeText(profile?.role || "");
-  return Boolean(profile && (role.includes("consultor") || role === "comercial"));
+  return !profile || role.includes("consultor") || role === "comercial" || role.includes("usuario");
 }
 
 function currentUserScope() {
@@ -832,9 +852,11 @@ function visibleDbRows(moduleKey) {
 function applyUserScopeDefaults(moduleKey, values) {
   if (!consultantScopeActive()) return values;
   const profile = currentUserRecord() || {};
-  const owner = profile.name || cloud()?.currentUser?.()?.email || currentUserLabel();
+  const userEmail = String(profile.email || profile.contactEmail || currentUserEmail()).toLowerCase();
+  const owner = profile.name || userEmail || currentUserLabel();
   if (schemas[moduleKey]?.fields?.some((fieldDef) => fieldDef.name === "owner")) values.owner = values.owner || owner;
-  if (moduleKey === "renovacoes") values.consultantEmail = values.consultantEmail || profile.email || cloud()?.currentUser?.()?.email || "";
+  if (["contratos", "renovacoes", "agenda", "comissoes", "notificacoes"].includes(moduleKey)) values.consultantEmail = values.consultantEmail || userEmail;
+  values.ownerEmail = values.ownerEmail || userEmail;
   if (moduleKey === "comissoes" && !values.seller) values.seller = owner;
   return values;
 }
@@ -928,6 +950,190 @@ async function syncTenantAccessIfNeeded(moduleKey) {
   }
 }
 
+function dataModel() {
+  return window.GestaoGovDataModel || null;
+}
+
+function snapshotKeyForCollection(collectionKey) {
+  return dataModel()?.snapshotKey?.(collectionKey) || collectionKey;
+}
+
+function snapshotCollectionKeys() {
+  const keys = dataModel()?.snapshotCollections || [];
+  if (keys.length) return keys.filter((key) => Array.isArray(db[snapshotKeyForCollection(key)]));
+  return Object.entries(db)
+    .filter(([, value]) => Array.isArray(value))
+    .map(([key]) => key);
+}
+
+function relatedCollectionKeys(moduleKey) {
+  const map = {
+    contratos: ["clientes", "contratos", "renovacoes", "notificacoes"],
+    renovacoes: ["renovacoes", "notificacoes"],
+    clientes: ["clientes"],
+    usuarios: ["usuarios"],
+    empresas: ["empresas"],
+    licitacoes: ["licitacoes"],
+    propostas: ["propostas"],
+    documentos: ["documentos"],
+    agenda: ["agenda"],
+    marketing: ["marketing"],
+    financeiro: ["financeiro"],
+    comissoes: ["comissoes"],
+    templates: ["templates"],
+    regioes: ["regioes"],
+    documentosImportantes: ["documentosImportantes"],
+    sistema: ["sistema"],
+    gruposUsuarios: ["gruposUsuarios"],
+  };
+  return [...new Set(map[moduleKey] || [moduleKey])].filter((key) => Array.isArray(db[snapshotKeyForCollection(key)]));
+}
+
+function currentTenantId() {
+  return cloud()?.tenantId?.() || "computeck-demo";
+}
+
+function resolvedRecordEmail(item = {}) {
+  const direct = cleanImport(
+    item.consultantEmail ||
+    item.consultor_responsavel ||
+    item.ownerEmail ||
+    item.responsibleEmail ||
+    item.userEmail
+  );
+  if (direct.includes("@")) return direct.toLowerCase();
+  return cleanImport(findConsultantEmail(item.owner || item.seller || item.manager || item.responsible || item.consultant || item.user)).toLowerCase();
+}
+
+function scopedSaaSRecord(collectionKey, item = {}) {
+  const scoped = { ...item, tenantId: currentTenantId() };
+  let email = resolvedRecordEmail(scoped);
+  if (!email && collectionKey === "notificacoes") {
+    const renewal = (db.renovacoes || []).find((row) => row.id === scoped.renewalId || sameText(row.contract, scoped.contract));
+    const contract = (db.contratos || []).find((row) => row.id === scoped.contractId || sameText(row.name, scoped.contract));
+    email = resolvedRecordEmail(renewal || {}) || resolvedRecordEmail(contract || {});
+  }
+  if (email && ["clientes", "contratos", "renovacoes", "licitacoes", "propostas", "documentos", "agenda", "marketing", "financeiro", "comissoes", "notificacoes"].includes(collectionKey)) {
+    scoped.consultantEmail = scoped.consultantEmail || email;
+    scoped.ownerEmail = scoped.ownerEmail || email;
+  }
+  return scoped;
+}
+
+function scopedSaaSDbSnapshot(collectionKeys) {
+  const scoped = { ...db };
+  collectionKeys.forEach((key) => {
+    const sourceKey = snapshotKeyForCollection(key);
+    if (Array.isArray(db[sourceKey])) {
+      scoped[sourceKey] = db[sourceKey].map((item) => scopedSaaSRecord(key, item));
+    }
+  });
+  return scoped;
+}
+
+async function syncCloudCollections(keys, options = {}) {
+  if (!cloudEnabled() || !cloud()?.syncSnapshotCollections) return null;
+  const collectionKeys = [...new Set((keys || []).filter(Boolean))];
+  if (!collectionKeys.length) return null;
+  try {
+    const result = await cloud().syncSnapshotCollections(scopedSaaSDbSnapshot(collectionKeys), {
+      collectionKeys,
+      activateCollections: options.activateCollections === true,
+    });
+    if (result?.collections) setCloudStatus(`Colecoes SaaS sincronizadas: ${result.collections}.`);
+    return result;
+  } catch (error) {
+    console.warn("Collection sync warning", error);
+    setCloudStatus("Alteracao salva. Sincronizacao das colecoes SaaS sera conferida depois.");
+    return null;
+  }
+}
+
+async function saveScopedCloudRecord(collectionKey, item) {
+  if (!item?.id || !cloudEnabled() || !cloud()?.saveRecord) return null;
+  try {
+    return await cloud().saveRecord(collectionKey, scopedSaaSRecord(collectionKey, item));
+  } catch (error) {
+    console.warn(`Scoped record sync warning: ${collectionKey}`, error);
+    setCloudStatus("Registro salvo. Sincronizacao pontual da colecao sera conferida depois.");
+    return null;
+  }
+}
+
+async function deleteScopedCloudRecord(collectionKey, item) {
+  if (!item?.id || !cloudEnabled() || !cloud()?.deleteRecord) return false;
+  try {
+    return await cloud().deleteRecord(collectionKey, item.id);
+  } catch (error) {
+    console.warn(`Scoped record delete warning: ${collectionKey}`, error);
+    setCloudStatus("Registro removido localmente. Exclusao na colecao sera conferida depois.");
+    return false;
+  }
+}
+
+function scopedRelatedRecords(moduleKey, item = {}) {
+  const entries = item?.id ? [{ key: moduleKey, item }] : [];
+  if (moduleKey === "contratos") {
+    const client = (db.clientes || []).find((row) => row.id === item.clientId || sameText(row.name, item.client) || sameText(row.originalName, item.client));
+    const renewal = findRenewalForContract(item);
+    if (client?.id) entries.push({ key: "clientes", item: client });
+    if (renewal?.id) entries.push({ key: "renovacoes", item: renewal });
+  }
+  if (["contratos", "renovacoes"].includes(moduleKey)) {
+    const notifications = (db.notificacoes || []).filter((row) => (
+      row.contractId === item.id ||
+      row.renewalId === item.id ||
+      (item.contractId && row.contractId === item.contractId)
+    ));
+    notifications.forEach((notification) => entries.push({ key: "notificacoes", item: notification }));
+  }
+  const seen = new Set();
+  return entries.filter((entry) => {
+    const signature = `${entry.key}:${entry.item.id}`;
+    if (seen.has(signature)) return false;
+    seen.add(signature);
+    return true;
+  });
+}
+
+async function syncScopedRecordsFor(moduleKey, item, operation = "save") {
+  if (operation === "delete") return deleteScopedCloudRecord(moduleKey, item);
+  const entries = scopedRelatedRecords(moduleKey, item);
+  await Promise.all(entries.map((entry) => saveScopedCloudRecord(entry.key, entry.item)));
+  return entries.length;
+}
+
+function syncCloudCollectionsFor(moduleKey, item = null, operation = "save") {
+  if (consultantScopeActive()) return syncScopedRecordsFor(moduleKey, item, operation);
+  return syncCloudCollections(relatedCollectionKeys(moduleKey));
+}
+
+async function migrateSnapshotToSaaSCollections() {
+  if (!cloudEnabled() || !cloud()?.migrateSnapshotToCollections) {
+    toast("Firebase nao conectado para migrar o modelo SaaS.");
+    return;
+  }
+  if (consultantScopeActive()) {
+    toast("A migracao do modelo SaaS e restrita aos administradores.");
+    return;
+  }
+  setCloudStatus("Migrando base atual para colecoes SaaS por tenant...");
+  const keys = snapshotCollectionKeys();
+  try {
+    const result = await cloud().migrateSnapshotToCollections(scopedSaaSDbSnapshot(keys), {
+      collectionKeys: keys,
+      activateCollections: true,
+    });
+    await saveDb("Ativou modelo SaaS", `${result.records} registro(s) em ${result.collections} colecao(oes)`);
+    setCloudStatus(`Modelo SaaS ativo: ${result.records} registro(s) em ${result.collections} colecao(oes).`);
+    toast("Modelo SaaS ativado para este tenant.");
+  } catch (error) {
+    console.error("SaaS migration error", error);
+    setCloudStatus("Nao foi possivel ativar o modelo SaaS agora.");
+    toast("Falha ao migrar para colecoes SaaS.");
+  }
+}
+
 async function enterSystem(email, password) {
   if (!cloudEnabled()) {
     setCloudStatus("Firebase obrigatorio. Verifique a configuracao do projeto.");
@@ -960,7 +1166,10 @@ async function enterSystem(email, password) {
     } else {
       const renewed = syncAllContractRenewals();
       const automated = await processRenewalAutomation({ generateLetters: true });
-      if (shouldReplaceDemoDb || renewed || automated) await cloud().saveDb(db);
+      if (shouldReplaceDemoDb || renewed || automated) {
+        await cloud().saveDb(db);
+        await syncCloudCollections(["contratos", "renovacoes", "notificacoes"]);
+      }
     }
   } catch (error) {
     console.warn("Firebase post-login sync warning", error);
@@ -1035,14 +1244,24 @@ function saveDb(action, detail) {
   if (!cloudEnabled()) {
     setCloudStatus("Firebase obrigatorio. Alteracao nao salva.");
     toast("Firebase nao conectado. Alteracao nao salva.");
-    return;
+    return Promise.resolve(false);
   }
-  cloud()
+  return cloud()
     .saveDb(db)
-    .then(() => setCloudStatus("Alteracao salva no Firebase."))
-    .catch(() => {
+    .then(() => {
+      setCloudStatus("Alteracao salva no Firebase.");
+      return true;
+    })
+    .catch((error) => {
+      const dataMode = cloud()?.tenantInfo?.()?.dataMode || "";
+      const permissionDenied = /permission|insufficient|denied/i.test(String(error?.message || error?.code || ""));
+      if (consultantScopeActive() && dataMode === "collections" && permissionDenied) {
+        setCloudStatus("Snapshot legado protegido. Salvando direto na colecao SaaS.");
+        return false;
+      }
       setCloudStatus("Falha ao salvar no Firebase. Verifique a conexao.");
       toast("Falha ao salvar no Firebase.");
+      return false;
     });
 }
 
@@ -1065,7 +1284,7 @@ function bindEvents() {
     const email = String(form.get("email") || "");
     const password = String(form.get("password") || "");
     const entered = await enterSystem(email, password);
-    if (entered) toast("Bem-vindo ao VendeGov CRM.");
+    if (entered) toast("Bem-vindo ao GestãoGOV!");
   });
   el.resetPasswordButton.addEventListener("click", requestPasswordReset);
   el.logoutButton.addEventListener("click", async () => {
@@ -2399,6 +2618,7 @@ function ensureRenewalNotification(renewal, milestone, days) {
     contract: renewal.contract || renewal.name || "",
     renewalId: renewal.id || "",
     contractId: renewal.contractId || "",
+    consultantEmail: cleanImport(renewal.consultantEmail) || findConsultantEmail(renewal.owner),
     milestone,
     dueDate: endDate,
     status: milestone <= 30 ? "red" : "yellow",
@@ -2462,6 +2682,7 @@ function ensureQueuedNotification(renewal) {
     contract: renewal.contract || renewal.name || "",
     renewalId: renewal.id || "",
     contractId: renewal.contractId || "",
+    consultantEmail: cleanImport(renewal.consultantEmail) || findConsultantEmail(renewal.owner),
     dueDate: renewal.currentEnd || renewal.renewalDate || "",
     status: "cyan",
     read: false,
@@ -2529,6 +2750,7 @@ function ensureLetterNotification(renewal) {
     contract: renewal.contract || renewal.name || "",
     renewalId: renewal.id || "",
     contractId: renewal.contractId || "",
+    consultantEmail: cleanImport(renewal.consultantEmail) || findConsultantEmail(renewal.owner),
     dueDate: renewal.currentEnd || renewal.renewalDate || "",
     status: renewal.clientEmail ? "yellow" : "red",
     read: false,
@@ -2626,7 +2848,7 @@ function renewalLetterTemplate(contract = {}, renewal = {}) {
     "Ficamos a disposicao para alinhar escopo, prazos e documentos necessarios.",
     "",
     "Atenciosamente,",
-    contacts.consultantName || "Equipe VendeGov",
+    contacts.consultantName || "Equipe GestãoGOV!",
   ].join("\n");
 }
 
@@ -3129,7 +3351,7 @@ function aiWorkspaceHtml() {
       <div class="table-toolbar">
         <div>
           <h2>Como a IA entra na rotina</h2>
-          <p>O VendeGov usa a IA configurada para transformar documentos e dados de contratos em registros e textos operacionais.</p>
+          <p>O GestãoGOV! usa a IA configurada para transformar documentos e dados de contratos em registros e textos operacionais.</p>
         </div>
       </div>
       <div class="ai-flow">
@@ -3238,6 +3460,14 @@ function renderImportExportCenter() {
             <button class="primary-button" data-import-full type="button">Importar base</button>
             <button class="secondary-button" data-export-db type="button">Exportar backup</button>
           </div>
+        </div>
+      </article>
+      <article class="import-card">
+        <span>SaaS</span>
+        <div>
+          <h3>Ativar modelo multitenant</h3>
+          <p>Migra o snapshot atual para colecoes normalizadas por tenant e prepara a base para planos, usuarios e empresas internas.</p>
+          <button class="secondary-button" data-migrate-saas type="button">Migrar para colecoes SaaS</button>
         </div>
       </article>
       <article class="import-card">
@@ -3403,6 +3633,7 @@ function bindDynamicActions() {
     renderRenewals();
   }));
   document.querySelectorAll("[data-export-db]").forEach((button) => button.addEventListener("click", exportDb));
+  document.querySelectorAll("[data-migrate-saas]").forEach((button) => button.addEventListener("click", migrateSnapshotToSaaSCollections));
   document.querySelectorAll("[data-import-full]").forEach((button) => button.addEventListener("click", () => {
     startImport("", ".json,.csv,application/json,text/csv");
   }));
@@ -3446,7 +3677,7 @@ function refreshAiSurface() {
   return renderAi();
 }
 
-function saveAiConfigForm(event) {
+async function saveAiConfigForm(event) {
   event.preventDefault();
   const form = new FormData(event.currentTarget);
   db.aiConfig = {
@@ -3462,7 +3693,7 @@ function saveAiConfigForm(event) {
     updatedAt: today(),
   };
   syncCloudAiConfig();
-  saveDb("Atualizou configuracao de IA", `${aiProviderLabel(db.aiConfig.provider)} - ${db.aiConfig.model}`);
+  await saveDb("Atualizou configuracao de IA", `${aiProviderLabel(db.aiConfig.provider)} - ${db.aiConfig.model}`);
   renderSettings();
   toast("Configuracao de IA salva.");
 }
@@ -3474,7 +3705,8 @@ async function refreshRenewalAutomation() {
   }
   const changed = await processRenewalAutomation({ generateLetters: true });
   if (changed) {
-    saveDb("Atualizou alertas de renovacao", `${changed} alteracao(oes) geradas`);
+    await saveDb("Atualizou alertas de renovacao", `${changed} alteracao(oes) geradas`);
+    await syncCloudCollections(["renovacoes", "notificacoes"]);
     toast("Alertas e cartas atualizados.");
   } else {
     toast("Renovacoes conferidas. Nenhuma nova pendencia.");
@@ -3490,7 +3722,8 @@ async function generateStoredRenewalLetter(id) {
     return;
   }
   await generateAutomaticRenewalLetter(renewal, { force: true });
-  saveDb("Gerou carta automatica", renewal.contract || renewal.name || id);
+  await saveDb("Gerou carta automatica", renewal.contract || renewal.name || id);
+  await syncCloudCollections(["renovacoes", "notificacoes"]);
   render();
   toast(renewal.clientEmail ? "Carta pronta para envio." : "Carta gerada. Complete o e-mail do cliente.");
 }
@@ -3504,12 +3737,14 @@ async function emailRenewalLetter(id) {
   }
   if (!renewal.letterDraft) {
     await generateAutomaticRenewalLetter(renewal, { force: true });
-    saveDb("Gerou carta automatica", renewal.contract || renewal.name || id);
+    await saveDb("Gerou carta automatica", renewal.contract || renewal.name || id);
+    await syncCloudCollections(["renovacoes", "notificacoes"]);
   }
   renewal = (db.renovacoes || []).find((item) => item.id === id);
   if (!renewal.clientEmail) {
     renewal.emailStatus = "blocked";
-    saveDb("Bloqueou envio de renovacao", "Cliente sem e-mail cadastrado");
+    await saveDb("Bloqueou envio de renovacao", "Cliente sem e-mail cadastrado");
+    await syncCloudCollections(["renovacoes"]);
     openForm("renovacoes", id);
     toast("Complete o e-mail do cliente para enviar.");
     return;
@@ -3520,11 +3755,12 @@ async function emailRenewalLetter(id) {
     return;
   }
   window.location.href = link;
-  saveDb("Preparou envio de carta", renewal.contract || renewal.name || id);
+  await saveDb("Preparou envio de carta", renewal.contract || renewal.name || id);
+  await syncCloudCollections(["renovacoes"]);
   toast("E-mail aberto. Depois marque como enviada.");
 }
 
-function markRenewalLetterSent(id) {
+async function markRenewalLetterSent(id) {
   const renewal = (db.renovacoes || []).find((item) => item.id === id);
   if (!renewal) return;
   if (!canSeeRecord("renovacoes", renewal)) {
@@ -3536,7 +3772,8 @@ function markRenewalLetterSent(id) {
   renewal.followUpAt = today();
   if (["Mapeada", "Em contato"].includes(renewal.stage)) renewal.stage = "Proposta enviada";
   renewal.updatedAt = now();
-  saveDb("Registrou envio de carta", renewal.contract || renewal.name || id);
+  await saveDb("Registrou envio de carta", renewal.contract || renewal.name || id);
+  await syncCloudCollections(["renovacoes"]);
   render();
   toast("Envio registrado na renovacao.");
 }
@@ -3576,13 +3813,14 @@ async function ensureRenewalLetterDraft(id, force = false) {
   }
   if (!renewal.letterDraft || force) {
     await generateAutomaticRenewalLetter(renewal, { force: true });
-    saveDb("Gerou carta de renovacao", renewal.contract || renewal.name || id);
+    await saveDb("Gerou carta de renovacao", renewal.contract || renewal.name || id);
+    await syncCloudCollections(["renovacoes", "notificacoes"]);
     render();
   }
   return (db.renovacoes || []).find((item) => item.id === id) || renewal;
 }
 
-function handleLetterModalClick(event) {
+async function handleLetterModalClick(event) {
   const tabButton = event.target.closest("[data-letter-modal-tab]");
   if (tabButton) {
     state.letterTab = tabButton.dataset.letterModalTab;
@@ -3591,25 +3829,25 @@ function handleLetterModalClick(event) {
   }
   const saveButton = event.target.closest("[data-letter-save]");
   if (saveButton) {
-    saveLetterDraftFromModal();
+    await saveLetterDraftFromModal();
     return;
   }
   const emailButton = event.target.closest("[data-letter-email-now]");
   if (emailButton) {
-    emailRenewalLetter(emailButton.dataset.letterEmailNow);
+    await emailRenewalLetter(emailButton.dataset.letterEmailNow);
     renderLetterModal();
     return;
   }
   const sentButton = event.target.closest("[data-letter-modal-sent]");
   if (sentButton) {
-    markRenewalLetterSent(sentButton.dataset.letterModalSent);
+    await markRenewalLetterSent(sentButton.dataset.letterModalSent);
     state.letterRenewalId = sentButton.dataset.letterModalSent;
     renderLetterModal();
     return;
   }
   const unsentButton = event.target.closest("[data-letter-modal-unsent]");
   if (unsentButton) {
-    markRenewalLetterNotSent(unsentButton.dataset.letterModalUnsent);
+    await markRenewalLetterNotSent(unsentButton.dataset.letterModalUnsent);
     renderLetterModal();
     return;
   }
@@ -3673,7 +3911,7 @@ function renewalLetterEditHtml(renewal, company) {
       <section class="letter-config-card">
         <h3>Timbre utilizado</h3>
         <div class="letter-company-mini">
-          ${company.logoUrl ? `<img src="${escapeAttr(company.logoUrl)}" alt="">` : `<span>${escapeHtml(initials(company.name || "VG"))}</span>`}
+          ${company.logoUrl ? `<img src="${escapeAttr(company.logoUrl)}" alt="">` : `<span>${escapeHtml(initials(company.name || "GG"))}</span>`}
           <div>
             <strong>${escapeHtml(company.name || "Empresa responsavel")}</strong>
             <small>${escapeHtml(companyLine(company) || "Configure endereco, e-mail e CNPJ em Parametros > Empresas.")}</small>
@@ -3732,7 +3970,7 @@ function renewalLetterEmailHtml(renewal, company) {
   `;
 }
 
-function saveLetterDraftFromModal() {
+async function saveLetterDraftFromModal() {
   const renewal = (db.renovacoes || []).find((item) => item.id === state.letterRenewalId);
   if (!renewal) return;
   if (!canSeeRecord("renovacoes", renewal)) {
@@ -3747,7 +3985,8 @@ function saveLetterDraftFromModal() {
   renewal.letterGeneratedAt = renewal.letterGeneratedAt || today();
   renewal.emailStatus = renewal.clientEmail ? "ready" : "blocked";
   renewal.updatedAt = now();
-  saveDb("Editou carta de renovacao", renewal.contract || renewal.name || renewal.id);
+  await saveDb("Editou carta de renovacao", renewal.contract || renewal.name || renewal.id);
+  await syncCloudCollections(["renovacoes"]);
   render();
   state.letterRenewalId = renewal.id;
   state.letterTab = "preview";
@@ -3755,7 +3994,7 @@ function saveLetterDraftFromModal() {
   toast("Carta salva.");
 }
 
-function markRenewalLetterNotSent(id) {
+async function markRenewalLetterNotSent(id) {
   const renewal = (db.renovacoes || []).find((item) => item.id === id);
   if (!renewal) return;
   if (!canSeeRecord("renovacoes", renewal)) {
@@ -3765,7 +4004,8 @@ function markRenewalLetterNotSent(id) {
   renewal.emailStatus = renewal.clientEmail ? (renewal.letterDraft ? "ready" : "pending") : "blocked";
   renewal.letterSentAt = "";
   renewal.updatedAt = now();
-  saveDb("Marcou carta como nao enviada", renewal.contract || renewal.name || id);
+  await saveDb("Marcou carta como nao enviada", renewal.contract || renewal.name || id);
+  await syncCloudCollections(["renovacoes"]);
   render();
   state.letterRenewalId = id;
   toast("Carta marcada como nao enviada.");
@@ -3803,7 +4043,7 @@ function letterDocumentHtml(renewal, company) {
   return `
     <article class="letter-paper">
       <header class="letterhead">
-        ${company.logoUrl ? `<img src="${escapeAttr(company.logoUrl)}" alt="${escapeAttr(company.name || "Logo")}">` : `<div class="letter-logo-fallback">${escapeHtml(initials(company.name || "VG"))}</div>`}
+        ${company.logoUrl ? `<img src="${escapeAttr(company.logoUrl)}" alt="${escapeAttr(company.name || "Logo")}">` : `<div class="letter-logo-fallback">${escapeHtml(initials(company.name || "GG"))}</div>`}
         <h3>${escapeHtml(company.name || "Empresa responsavel")}</h3>
         ${companyLine(company) ? `<p>${escapeHtml(companyLine(company))}</p>` : ""}
         ${companyContactLine(company) ? `<p>${escapeHtml(companyContactLine(company))}</p>` : ""}
@@ -3836,7 +4076,7 @@ function responsibleCompanyForRenewal(renewal = {}, contract = {}) {
   const active = companies.find((company) => company.status === "green") || companies[0];
   return {
     name: "Computeck Solucoes Inteligentes",
-    logoUrl: "./assets/vendegov-crm-logo-horizontal.svg",
+    logoUrl: "./assets/vendegov-crm-logo-horizontal.svg?v=20260830-gestaogov-brand",
     email: "steven.passos@computeck.com.br",
     city: "Governador Valadares/MG",
     ...(active || {}),
@@ -3874,7 +4114,7 @@ function letterPrintCss() {
   `;
 }
 
-function updateRenewalResult(id, result) {
+async function updateRenewalResult(id, result) {
   const renewal = (db.renovacoes || []).find((item) => item.id === id);
   if (!renewal) return;
   const map = {
@@ -3889,7 +4129,8 @@ function updateRenewalResult(id, result) {
   renewal.status = status;
   renewal.followUpAt = today();
   renewal.updatedAt = now();
-  saveDb("Atualizou resultado da renovacao", `${renewal.contract || renewal.name || id}: ${result}`);
+  await saveDb("Atualizou resultado da renovacao", `${renewal.contract || renewal.name || id}: ${result}`);
+  await syncCloudCollections(["renovacoes"]);
   renderRenewals();
   toast("Resultado atualizado.");
 }
@@ -3982,7 +4223,7 @@ function NovoContratoPage(values = {}) {
             ${newContractTextarea("notes", "Observacoes", values.notes, { className: "span-2", rows: 4 })}
           </div>
         `)}
-        ${newContractCard("documentos", "Documentos", "Envie o PDF para o VendeGov e mantenha as referencias tecnicas do arquivo.", `
+        ${newContractCard("documentos", "Documentos", "Envie o PDF para o GestãoGOV! e mantenha as referencias tecnicas do arquivo.", `
           <div class="new-contract-grid two-columns">
             <label class="new-contract-field span-2 new-contract-upload">
               <span>Enviar PDF para o sistema</span>
@@ -3991,7 +4232,7 @@ function NovoContratoPage(values = {}) {
             </label>
             ${newContractInput("fileRef", "Nome do PDF na plataforma", values.fileRef, { readonly: true, placeholder: "Preenchido automaticamente apos selecionar o arquivo" })}
             ${newContractInput("sourceId", "ID origem", values.sourceId, { readonly: true, placeholder: "Referencia tecnica de importacao" })}
-            ${newContractInput("fileUrl", "PDF salvo no VendeGov", values.fileUrl, { readonly: true, placeholder: "Gerado apos upload" })}
+            ${newContractInput("fileUrl", "PDF salvo no GestãoGOV!", values.fileUrl, { readonly: true, placeholder: "Gerado apos upload" })}
             ${newContractInput("documentUrl", "PDF origem", values.documentUrl, { readonly: true, placeholder: "Link externo quando importado" })}
           </div>
         `)}
@@ -4289,7 +4530,7 @@ async function scanContractIntoForm(file) {
     button.disabled = true;
     button.textContent = "Escaneando contrato...";
   }
-  setContractAiFormStatus("Lendo documento com IA...", "Aguarde enquanto o VendeGov identifica os dados principais do contrato.");
+  setContractAiFormStatus("Lendo documento com IA...", "Aguarde enquanto o GestãoGOV! identifica os dados principais do contrato.");
   try {
     const extracted = await cloud().analyzeContractFile(file);
     const contract = applyContractLegalDefaults(contractFromAiExtraction(extracted, file.name));
@@ -4452,7 +4693,8 @@ async function submitForm(event) {
       if (!consultantScopeActive()) await processRenewalAutomation({ generateLetters: true });
     }
     if (moduleKey === "renovacoes" && !consultantScopeActive()) await processRenewalAutomation({ generateLetters: true });
-    saveDb(`Editou ${schemas[moduleKey].singular}`, linkedClient ? `${values.name || id} vinculado a ${linkedClient.name}` : values.name || id);
+    await saveDb(`Editou ${schemas[moduleKey].singular}`, linkedClient ? `${values.name || id} vinculado a ${linkedClient.name}` : values.name || id);
+    await syncCloudCollectionsFor(moduleKey, db[moduleKey][idx]);
     await syncTenantAccessIfNeeded(moduleKey);
     updateUserProfileButton();
     toast("Registro atualizado.");
@@ -4465,7 +4707,8 @@ async function submitForm(event) {
       if (!consultantScopeActive()) await processRenewalAutomation({ generateLetters: true });
     }
     if (moduleKey === "renovacoes" && !consultantScopeActive()) await processRenewalAutomation({ generateLetters: true });
-    saveDb(`Criou ${schemas[moduleKey].singular}`, linkedClient ? `${values.name || "novo registro"} vinculado a ${linkedClient.name}` : values.name || "novo registro");
+    await saveDb(`Criou ${schemas[moduleKey].singular}`, linkedClient ? `${values.name || "novo registro"} vinculado a ${linkedClient.name}` : values.name || "novo registro");
+    await syncCloudCollectionsFor(moduleKey, created);
     await syncTenantAccessIfNeeded(moduleKey);
     updateUserProfileButton();
     toast("Registro criado.");
@@ -4510,7 +4753,8 @@ async function deleteConfirmed() {
     return;
   }
   db[moduleKey] = db[moduleKey].filter((row) => row.id !== id);
-  saveDb(`Removeu ${schemas[moduleKey].singular}`, item?.name || id);
+  await saveDb(`Removeu ${schemas[moduleKey].singular}`, item?.name || id);
+  await syncCloudCollectionsFor(moduleKey, item, "delete");
   await syncTenantAccessIfNeeded(moduleKey);
   closeConfirm();
   closeDrawer();
@@ -4582,7 +4826,7 @@ function detailField(label, value) {
 function contractPdfSection(moduleKey, item) {
   if (moduleKey !== "contratos" || (!item.fileUrl && !item.documentUrl)) return "";
   const internal = item.fileUrl
-    ? `<a class="primary-button" href="${escapeAttr(item.fileUrl)}" target="_blank" rel="noreferrer">Abrir PDF no VendeGov</a>`
+    ? `<a class="primary-button" href="${escapeAttr(item.fileUrl)}" target="_blank" rel="noreferrer">Abrir PDF no GestãoGOV!</a>`
     : "";
   const source = item.documentUrl
     ? `<a class="secondary-button" href="${escapeAttr(item.documentUrl)}" target="_blank" rel="noreferrer">Abrir PDF origem</a>`
@@ -4602,7 +4846,7 @@ function formatFieldValue(fieldDef, value) {
   if (fieldDef.name === "status") return badge(value);
   if (fieldDef.type === "url") {
     const label = fieldDef.name === "fileUrl"
-      ? "Abrir PDF no VendeGov"
+      ? "Abrir PDF no GestãoGOV!"
       : fieldDef.name === "documentUrl"
         ? "Abrir PDF origem"
         : fieldDef.name === "photoUrl"
@@ -4634,7 +4878,7 @@ function exportDb() {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = `vendegov-crm-backup-${today()}.json`;
+  link.download = `gestaogov-backup-${today()}.json`;
   link.click();
   URL.revokeObjectURL(url);
   saveDb("Exportou base", "Backup JSON gerado");
@@ -4645,7 +4889,7 @@ function importDb(event) {
   const file = event.target.files[0];
   if (!file) return;
   const reader = new FileReader();
-  reader.onload = () => {
+  reader.onload = async () => {
     try {
       const content = String(reader.result || "");
       if (isCsvFile(file) || el.importFile.dataset.mode) {
@@ -4654,7 +4898,8 @@ function importDb(event) {
       }
       const incoming = JSON.parse(content);
       db = { ...emptyDb(), ...incoming, audit: incoming.audit || [] };
-      saveDb("Importou base", file.name);
+      await saveDb("Importou base", file.name);
+      await syncCloudCollections(snapshotCollectionKeys());
       render();
       toast("Base importada.");
     } catch {
@@ -4727,9 +4972,11 @@ function importContractsRows(rows, fileName, targetView = "contratos") {
   contracts.forEach((contract) => syncContractRenewal(contract));
   processRenewalAutomation({ generateLetters: true }).then((changed) => {
     if (changed) saveDb("Atualizou alertas de renovacao", `${changed} alteracao(oes) apos importacao`);
+    if (changed) syncCloudCollections(["renovacoes", "notificacoes"]);
     if (state.view === targetView) render();
   }).catch(() => {});
   saveDb("Importou contratos", `${created} novos, ${updated} atualizados, ${skipped} ignorados - ${fileName}`);
+  syncCloudCollections(["clientes", "contratos", "renovacoes", "notificacoes"]);
   updateLoginNumbers();
   if (targetView === "renovacoes") state.renewalTab = "vencer";
   setView(targetView);
@@ -4747,6 +4994,7 @@ function contractFromCsvRow(row) {
   const percent = cleanImport(row.percentual_reajuste);
   const adjustment = [cleanImport(row.indice_reajuste), percent ? `${percent}%` : ""].filter(Boolean).join(" ");
   const responsibleCompany = cleanImport(row.empresa_responsavel || row.empresa_responsavel_id || row.empresa_interna || row.contratada || row.fornecedor || row.company);
+  const consultantRef = cleanImport(row.consultor_email || row.consultor_responsavel || row.email_consultor || row.ownerEmail);
   return {
     id: sourceId || uid(),
     sourceId,
@@ -4775,6 +5023,7 @@ function contractFromCsvRow(row) {
     adjustment,
     documentUrl: cleanImport(row.arquivo_contrato),
     owner: mapConsultant(row.consultor_responsavel),
+    consultantEmail: consultantRef.includes("@") ? consultantRef.toLowerCase() : "",
     notes: contractImportNotes(row),
   };
 }
@@ -4827,6 +5076,7 @@ function importClientsRows(rows, fileName) {
   });
   db.clientes = clients;
   saveDb("Importou clientes", `${created} novos, ${updated} atualizados, ${skipped} ignorados - ${fileName}`);
+  syncCloudCollections(["clientes"]);
   setView("clientes");
   toast(`${created} clientes importados, ${updated} atualizados.`);
 }
@@ -4836,6 +5086,8 @@ function clientFromCsvRow(row) {
   const name = cleanImport(row.nome_exibicao) || cleanImport(row.orgao_original) || cleanImport(row.municipio);
   if (!sourceId && !name) return null;
   const contact = contactFromBase44(row.contatos);
+  const consultantRef = cleanImport(row.consultor_email || row.consultor_responsavel || row.email_consultor || row.ownerEmail);
+  const owner = mapConsultant(consultantRef || row.consultor_responsavel);
   return {
     id: sourceId || uid(),
     sourceId,
@@ -4853,7 +5105,8 @@ function clientFromCsvRow(row) {
     originalName: cleanImport(row.orgao_original),
     potential: 0,
     status: "green",
-    owner: "Equipe comercial",
+    owner: owner === "Equipe comercial" ? "Equipe comercial" : owner,
+    consultantEmail: consultantRef.includes("@") ? consultantRef.toLowerCase() : "",
     notes: clientImportNotes(row, contact),
   };
 }
@@ -4928,6 +5181,7 @@ function importConsultantsRows(rows, fileName) {
   });
   db.usuarios = users;
   saveDb("Importou consultores", `${created} novos, ${updated} atualizados, ${skipped} ignorados - ${fileName}`);
+  syncCloudCollections(["usuarios"]);
   syncTenantAccessIfNeeded("usuarios");
   state.configTab = "usuarios";
   setView("configuracoes");
@@ -5197,7 +5451,8 @@ async function saveAiDraftContract() {
   if (!consultantScopeActive()) await processRenewalAutomation({ generateLetters: true });
   state.aiContractId = item.id;
   state.aiDraftContract = null;
-  saveDb("Cadastrou contrato por IA", item.name);
+  await saveDb("Cadastrou contrato por IA", item.name);
+  await syncCloudCollections(["clientes", "contratos", "renovacoes", "notificacoes"]);
   updateLoginNumbers();
   setView("contratos");
   toast("Contrato cadastrado no Firebase.");
@@ -5258,7 +5513,8 @@ async function generateRenewalLetterFromSelection(contractId = state.aiContractI
       renewal.updatedAt = now();
       ensureLetterNotification(renewal);
     }
-    saveDb("Gerou carta de renovacao", contract.name || contract.id);
+    await saveDb("Gerou carta de renovacao", contract.name || contract.id);
+    await syncCloudCollections(["renovacoes", "notificacoes"]);
     toast("Carta de renovacao gerada.");
   } catch (error) {
     toast(aiErrorMessage(error));
@@ -5287,7 +5543,8 @@ async function generateRenewalLetterForRenewalId(id) {
     return;
   }
   await generateAutomaticRenewalLetter(renewal, { force: true });
-  saveDb("Gerou carta de renovacao", contract.name || contract.id);
+  await saveDb("Gerou carta de renovacao", contract.name || contract.id);
+  await syncCloudCollections(["renovacoes", "notificacoes"]);
   state.aiContractId = contract.id;
   state.aiLetter = renewal.letterDraft || "";
   openAiWorkspace();
